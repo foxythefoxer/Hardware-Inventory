@@ -229,8 +229,9 @@ if have lsblk; then
   # -P (key="value") is used deliberately: plain columnar output collapses
   # empty MODEL/SERIAL fields and silently shifts every later column.
   fld() { printf '%s' "$2" | sed -n "s/.*[[:space:]]\{0,\}$1=\"\([^\"]*\)\".*/\1/p"; }
-  $TMO lsblk -dn -P -o NAME,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null \
+  $TMO lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null \
     | grep -Ev 'NAME="(loop|ram|zram|sr)[0-9]*"' \
+    | grep -F 'TYPE="disk"' \
     | while IFS= read -r line; do
         name=$(fld NAME "$line");   [ -z "$name" ] && continue
         size=$(fld SIZE "$line");   rota=$(fld ROTA "$line")
