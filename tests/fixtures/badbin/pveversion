@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "ERROR: pveversion exploded" >&2
+exit 1

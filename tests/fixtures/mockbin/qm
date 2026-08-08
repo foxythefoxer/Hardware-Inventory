@@ -1,0 +1,17 @@
+#!/bin/bash
+case "$1" in
+list) printf '      VMID NAME       STATUS     MEM(MB)    BOOTDISK(GB) PID\n       301 vm-proxy01 running    2048              21.00 1234\n';;
+config) cat <<'C'
+boot: order=scsi0
+cores: 2
+ide2: none,media=cdrom
+memory: 2048
+name: vm-proxy01
+net0: virtio=00:00:5E:00:53:56,bridge=vmbr0
+onboot: 1
+ostype: l26
+scsi0: local-zfs:vm-301-disk-0,size=21G
+C
+;;
+status) echo "status: running";;
+esac

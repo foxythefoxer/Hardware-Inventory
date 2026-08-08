@@ -1,0 +1,2 @@
+#!/bin/bash
+[ "$1" = "-v" ] && printf 'proxmox-ve: 9.2.6\npve-manager: 9.2.6\n' || echo "pve-manager/9.2.6"

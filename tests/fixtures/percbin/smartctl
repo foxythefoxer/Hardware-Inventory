@@ -1,0 +1,16 @@
+#!/bin/bash
+[ "$1" = "--scan" ] && { echo "/dev/sda -d scsi # /dev/sda, SCSI device"; exit 0; }
+N=""; for a in "$@"; do case "$a" in megaraid,*) N="${a#megaraid,}";; esac; done
+case "$N" in
+0|1|8|9)
+cat <<C
+Device Model:     ST4000NM0033-9ZM170
+Serial Number:    Z1Z8ABC${N}
+SMART overall-health self-assessment test result: PASSED
+  5 Reallocated_Sector_Ct   0x0033   100   100   010    Pre-fail  Always       -       0
+  9 Power_On_Hours          0x0032   078   078   000    Old_age   Always       -       19${N}42
+194 Temperature_Celsius     0x0022   032   045   000    Old_age   Always       -       3${N}
+C
+exit 0;;
+*) echo "failed: No such device" >&2; exit 2;;
+esac

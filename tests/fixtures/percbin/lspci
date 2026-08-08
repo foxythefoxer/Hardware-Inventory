@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "03:00.0 RAID bus controller [0104]: Broadcom / LSI MegaRAID SAS 2008 [1000:0073] (rev 03)"
+echo "	Subsystem: Dell PERC H310 Mini [1028:1f51]"
+echo "	Kernel driver in use: megaraid_sas"

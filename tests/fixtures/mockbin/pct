@@ -1,0 +1,18 @@
+#!/bin/bash
+case "$1" in
+list) printf 'VMID       Status     Lock         Name\n202        running                 ct-dns01\n';;
+config) cat <<'C'
+arch: amd64
+cores: 1
+features: keyctl=1,nesting=1
+hostname: ct-dns01
+memory: 512
+net0: name=eth0,bridge=vmbr0,gw=198.51.100.1,hwaddr=00:00:5E:00:53:AA,ip=198.51.100.4/24,type=veth
+onboot: 1
+ostype: debian
+rootfs: local-zfs:subvol-202-disk-0,size=8G
+unprivileged: 1
+C
+;;
+status) echo "status: running";;
+esac
