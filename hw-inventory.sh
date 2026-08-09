@@ -634,11 +634,16 @@ if have docker && $TMO docker info >/dev/null 2>&1; then
   echo
   $TMO docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | head -100
   printf '```\n\n'
-  # Network + container IP per container. docker inspect is read-only.
-  DNET=$($TMO docker ps -a --format '{{.Names}}' 2>/dev/null | head -100 | while read -r c; do
-    nets=$(timeout 5 docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{if $v.IPAddress}}{{$v.IPAddress}}{{else}}—{{end}} {{end}}' "$c" 2>/dev/null)
-    [ -n "$nets" ] && printf '| %s | %s |\n' "$c" "$nets"
-  done)
+  # Network + container IP for every container in one call. docker inspect
+  # is read-only; container names are whitespace-free by construction, same
+  # as the device/VMID lists elsewhere in this script.
+  CNAMES=$($TMO docker ps -a --format '{{.Names}}' 2>/dev/null | head -100)
+  if [ -n "$CNAMES" ]; then
+    # shellcheck disable=SC2086
+    DNET=$(timeout 15 docker inspect -f '{{.Name}}|{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{if $v.IPAddress}}{{$v.IPAddress}}{{else}}—{{end}} {{end}}' $CNAMES 2>/dev/null \
+      | sed 's#^/##' \
+      | awk -F'|' 'NF==2 && $2!=""{printf "| %s | %s |\n", $1, $2}')
+  fi
   if [ -n "$DNET" ]; then
     printf '#### Container networks\n\n| Container | Network=IP |\n|---|---|\n%s\n\n' "$DNET"
   fi
