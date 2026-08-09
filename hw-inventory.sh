@@ -210,13 +210,16 @@ echo
 
 if is_root && have dmidecode; then
   MODLINES=$($TMO dmidecode -t memory 2>/dev/null | awk '
-    /^Memory Device$/ {loc="";size="";sp="";pn="";mf=""}
+    function emit() {
+      if (size != "" && size !~ /^No/) printf "| %s | %s | %s | %s | %s |\n", loc, size, sp, mf, pn
+    }
+    /^Memory Device$/ {emit(); loc="";size="";sp="";pn="";mf=""}
     /^\tLocator:/ {sub(/^\tLocator:[ \t]*/,""); loc=$0}
     /^\tSize:/ {sub(/^\tSize:[ \t]*/,""); size=$0}
     /^\tSpeed:/ && sp=="" {sub(/^\tSpeed:[ \t]*/,""); sp=$0}
     /^\tManufacturer:/ {sub(/^\tManufacturer:[ \t]*/,""); mf=$0}
-    /^\tPart Number:/ {sub(/^\tPart Number:[ \t]*/,""); pn=$0
-      if (size !~ /^No/) printf "| %s | %s | %s | %s | %s |\n", loc, size, sp, mf, pn}
+    /^\tPart Number:/ {sub(/^\tPart Number:[ \t]*/,""); pn=$0}
+    END {emit()}
   ')
   if [ -n "$MODLINES" ]; then
     printf '#### Installed DIMMs\n\n| Slot | Size | Speed | Vendor | Part number |\n|---|---|---|---|---|\n%s\n\n' "$MODLINES"
