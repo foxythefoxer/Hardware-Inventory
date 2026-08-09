@@ -138,7 +138,13 @@ Each was verified against the file and covered by `tests/run.sh` where testable.
 - `racadm` gated on `is_root` with its own `###` heading (F-020).
 - One `docker inspect` over all containers instead of N+1 (F-023).
 - DIMM rows emitted at record boundary (F-011).
-- `/proc/cmdline` values redacted for names matching `password|secret|token|key` (F-009).
+- `/proc/cmdline` redacted two ways (F-009): by parameter **name** matching
+  `password|secret|token|key`, and by **value** for credentials embedded inside dracut's
+  `netroot=iscsi:user:pass:rev_user:rev_pass@host:...` form, where the parameter name
+  gives nothing away. Everything between `iscsi:` and `@` is replaced, CHAP usernames
+  included; host, port, LUN and target name are kept. Covered by T9. The name-based pass
+  alone missed the embedded form for two commits — if you add another redaction, ask
+  first whether the secret can hide in the value.
 
 ---
 
@@ -160,7 +166,10 @@ changed. The suite now covers what this section used to ask for by hand:
 4. **T8 warning contract.** Both halves: a present-and-failing tool exits `1` and is
    named; a `PATH` where the tools are merely absent still exits `0` and warns about
    nothing. The second half is the one that catches over-eager warnings.
-5. `bash -n` (T1) and ShellCheck (T7, skipped when not installed). Baseline was **zero
+5. **T9 cmdline redaction.** Also both halves: secrets and CHAP usernames gone, and the
+   target name, initiator and `rd.iscsi.firmware` still present. Over-redaction is a real
+   failure too — a command line scrubbed of its target is no longer useful as inventory.
+6. `bash -n` (T1) and ShellCheck (T7, skipped when not installed). Baseline was **zero
    errors, zero warnings** on the default ruleset (24 findings, all severity `note`; the
    `SC2016` hits are false positives from single-quoted awk programs). Do not regress
    this — and note it has not been re-verified since the F-025/F-026 work, because
@@ -182,7 +191,10 @@ the branches; it found the `dmidecode` banner problem noted above. Run the suite
   contains a `csrf_token`; `ipmitool lan print` contains an SNMP community string. Both
   are filtered deliberately — extend that policy, don't work around it.
 - Serials, MACs and IPs **are** emitted on purpose; that's the point of an inventory.
-  Secrets are not. The line is "identifying" vs "authenticating."
+  Secrets are not. The line is "identifying" vs "authenticating." Worked example: an
+  iSCSI CHAP **username** is redacted, because it is half of a credential pair rather
+  than a name for a thing — while the target IQN, host and port beside it are kept. When
+  a value is arguably both, ask which side it is doing work on.
 - Section output is captured to a variable and printed only if non-empty, so absent
   hardware never leaves a bare table header. Row loops that are pipeline bodies must be
   captured too — both to keep that property and because `warn` cannot run inside one.

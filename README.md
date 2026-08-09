@@ -219,10 +219,27 @@ physical disk to pull, MACs feed DHCP reservations.
 reporting a bug here, redact serials and addresses first, or send only the section that
 demonstrates the problem.
 
-The kernel command line used to be emitted verbatim, which on some systems leaks secrets
-(`rd.luks.key`, iSCSI credentials). Values are now redacted for any parameter whose name
-contains `password`, `secret`, `token` or `key`; the parameter names are kept. That is a
-name-based filter, not a guarantee — glance at the section before sharing a report.
+The kernel command line used to be emitted verbatim, which on some systems leaks secrets.
+Two things are redacted now, with parameter names kept in both cases:
+
+- **By name** — any parameter whose name contains `password`, `secret`, `token` or `key`.
+  This covers `rd.luks.key` and `rd.iscsi.password`.
+- **By value** — credentials embedded *inside* a value, where no name match can see them.
+  dracut's iSCSI root is the known case, and its parameter is innocuously called
+  `netroot`:
+
+  ```
+  netroot=iscsi:user:pass:rev_user:rev_pass@host:port:...:targetname
+  → netroot=iscsi:REDACTED@host:port:...:targetname
+  ```
+
+  Everything between `iscsi:` and `@` goes, including the CHAP usernames — a username is
+  half of a credential pair, not merely identifying. Host, port, LUN and target name stay,
+  since that is the part worth inventorying.
+
+**This is a filter, not a proof.** It catches the forms known to appear here, not every
+way a secret can be written on a kernel command line. Glance at the section before
+sharing a report.
 
 ---
 
@@ -245,7 +262,7 @@ machine; all affect the completeness or fidelity of the report.
 | F-003 | 26 sites hardcoded `timeout N`, bypassing the `$TMO` fallback; without coreutils `timeout` several sections blanked silently. | Every site routes through the same `have timeout` gate, so a host without `timeout` runs the commands unwrapped instead of failing them. |
 | F-012 | The "physical devices" table filtered by name only, so `md*`, `dm-*` and ZFS zvols appeared as phantom drives — one per VM disk on a Proxmox host with `local-zfs`. | Filtered on `TYPE=="disk"` plus a `zd[0-9]` name exclusion, since zvols report `TYPE=disk` too. |
 | F-001 | No `LC_ALL=C`; a non-English locale left CPU and RAM fields empty. | `export LC_ALL=C` at the top. |
-| F-009 | `/proc/cmdline` emitted verbatim; could carry secrets. | Values are redacted for any parameter whose name contains `password`, `secret`, `token` or `key`, which covers `rd.luks.key`. Names are kept. |
+| F-009 | `/proc/cmdline` emitted verbatim; could carry secrets. | Redacted by parameter name (`password`, `secret`, `token`, `key` — covering `rd.luks.key`) and, since the follow-up, by value for credentials embedded inside dracut's `netroot=iscsi:…@…` form. Names are kept. A filter, not a proof — see the identifying-information note above. |
 | F-020 | The `racadm` block was not root-gated and had no heading, so its output landed under the previous section. | Gated on root, with its own `###` heading. |
 | F-011 | A DIMM with no `Part Number` line was dropped from the table but still counted in the slot total. | Rows are emitted at the record boundary, so every populated slot appears. |
 
@@ -268,7 +285,7 @@ hw-inventory.sh      the script
 README.md            this file
 CLAUDE.md            maintainer decisions, read by Claude Code at session start
 tests/run.sh         the test suite — bash tests/run.sh
-tests/fixtures/      failing/hanging tool stubs, Unraid and Proxmox mocks
+tests/fixtures/      failing/hanging tool stubs, Unraid, Proxmox and cmdline mocks
 docs/reviews/        independent code reviews and the prompt used to generate them
 docs/prompts/        prompts for ingesting output into an Obsidian vault
 ```

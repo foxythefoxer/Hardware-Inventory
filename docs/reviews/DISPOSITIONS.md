@@ -74,7 +74,7 @@ the commit that did it. The rest are accepted but not yet written.
 | C-014 | 22 fixed `head -N` truncations, 13 magic numbers, no marker when a limit is hit. | **Accepted.** This bug class has now recurred three times. Fix the pattern, not the instance. |
 | C-020 | `racadm` block not root-gated and has no `###` heading; output lands under the previous section. | **Done — `af2a682`.** Verified. Maintainer's bug. Gated on `is_root` and given its own `###` heading. |
 | C-023 | N+1: up to 100 serial `docker inspect` calls. | **Done — `13f37b6`.** One call over all containers, using `{{.Name}}` to map results back since docker applies the template once per object in argument order. No test coverage for this path; verified by hand against a stub docker. |
-| C-009 | `/proc/cmdline` emitted verbatim; may carry `rd.luks.key` or iSCSI credentials. | **Done — `5a343b7`.** Genuine gap in an otherwise deliberate redaction policy. Values are redacted for any parameter whose name contains `password`, `secret`, `token` or `key`; `rd.luks.key` falls out of the generic `key` match. Names are kept, and it is a name-based filter, not a guarantee. |
+| C-009 | `/proc/cmdline` emitted verbatim; may carry `rd.luks.key` or iSCSI credentials. | **Done — `5a343b7`, completed in `6378cb6`.** Genuine gap in an otherwise deliberate redaction policy. `5a343b7` redacted by parameter **name** (`password`, `secret`, `token`, `key`; `rd.luks.key` falls out of the generic `key` match) — which covered only half of what this very finding names. The iSCSI credentials it also lists live *inside* a value, under the innocuous name `netroot`, so no name match could ever see them; `6378cb6` added a value pass replacing everything between `iscsi:` and `@`, CHAP usernames included, keeping host, port, LUN and target. Covered by T9, verified to fail without the fix. Names are kept throughout. Still a filter, not a proof. |
 | C-004 | Markdown table cells unescaped; a literal `\|` corrupts the table. | **Accepted, downgraded to LOW.** Most pipe-bearing output already sits inside code fences. Narrow exposure, cheap fix. |
 | C-011 | A DIMM with no Part Number line is dropped from the table but still counted in the slot total. | **Done — `187e16e`.** Rows are emitted at the record boundary rather than on the `Part Number:` line, so every populated slot appears. Verified against a synthetic `dmidecode -t memory` fixture. |
 | C-001 | No `LC_ALL=C`. | **Done — `8f1d960`.** Verified harmless to the em-dash sentinel and awk `%.2f`. |
@@ -114,3 +114,7 @@ Checked against ShellCheck 0.10.0 and the file itself:
   with `local-zfs` before and after.
 - **"22 `head -N` truncation points"** (all three reviews) — **off by one.** The actual
   count is **23**, and has been since the first commit. C-014 remains open.
+- **C-009's own wording was the better spec.** It named "`rd.luks.key` **or iSCSI
+  credentials**", and the first fix (`5a343b7`) only handled the first. Re-reading the
+  finding text after implementing would have caught it two commits earlier — worth doing
+  for anything still open here.
