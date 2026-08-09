@@ -24,9 +24,18 @@ have() { command -v "$1" >/dev/null 2>&1; }
 NA="—"
 
 # Wrap anything that can block on an unresponsive network mount or storage
-# backend. df, findmnt and pvesm are the usual suspects.
-TMO=""
-have timeout && TMO="timeout 10"
+# backend. df, findmnt and pvesm are the usual suspects. TMO is the default
+# 10s wrapper; tmo() below applies the same "have timeout" gate for call
+# sites that need a different duration, instead of hardcoding `timeout N`
+# and bypassing the fallback for systems without coreutils timeout.
+TMO=()
+have timeout && TMO=(timeout 10)
+
+# tmo N cmd... — run cmd under `timeout N` if installed, or run it bare.
+tmo() {
+  local n=$1; shift
+  if have timeout; then timeout "$n" "$@"; else "$@"; fi
+}
 
 kv() { printf '| %s | %s |\n' "$1" "${2:-$NA}"; }
 
@@ -41,7 +50,7 @@ yk() {
 # dmidecode wrapper: quiet, returns empty on failure or non-root
 dmi() {
   have dmidecode || { echo ""; return; }
-  $TMO dmidecode -s "$1" 2>/dev/null | grep -v '^#' | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+  "${TMO[@]}" dmidecode -s "$1" 2>/dev/null | grep -v '^#' | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
 is_root() { [ "$(id -u)" -eq 0 ]; }
@@ -68,7 +77,7 @@ ARCH=$(uname -m)
 
 CPUMODEL=""
 if have lscpu; then
-  CPUMODEL=$($TMO lscpu 2>/dev/null | awk -F: '/^Model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+  CPUMODEL=$("${TMO[@]}" lscpu 2>/dev/null | awk -F: '/^Model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
 fi
 [ -z "$CPUMODEL" ] && CPUMODEL=$(awk -F: '/model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null)
 
@@ -89,7 +98,7 @@ BIOS=$(dmi bios-version)
 
 # Disks, used by both the inventory table and the SMART table.
 DISKS=""
-have lsblk && DISKS=$($TMO lsblk -dn -o NAME,TYPE 2>/dev/null \
+have lsblk && DISKS=$("${TMO[@]}" lsblk -dn -o NAME,TYPE 2>/dev/null \
   | awk '$2=="disk"{print $1}' | grep -Ev '^(loop|ram|zram|sr|zd[0-9])' || true)
 
 # ============================================================ frontmatter ===
@@ -156,7 +165,7 @@ echo
 # ----------------------------------------------------------------- CPU ------
 printf '### CPU\n\n| Field | Value |\n|---|---|\n'
 if have lscpu; then
-  LC=$($TMO lscpu 2>/dev/null)
+  LC=$("${TMO[@]}" lscpu 2>/dev/null)
   kv "Model" "$CPUMODEL"
   kv "Sockets" "$(echo "$LC" | awk -F: '/^Socket\(s\)/{gsub(/ /,"",$2); print $2; exit}')"
   kv "Cores per socket" "$(echo "$LC" | awk -F: '/^Core\(s\) per socket/{gsub(/ /,"",$2); print $2; exit}')"
@@ -210,16 +219,16 @@ printf '### Memory\n\n| Field | Value |\n|---|---|\n'
 have free && kv "Total RAM" "$RAMTOTAL"
 have free && kv "Swap total" "$(free -h 2>/dev/null | awk '/^Swap:/{print $2}')"
 if is_root && have dmidecode; then
-  SLOTS=$($TMO dmidecode -t memory 2>/dev/null | grep -c '^Memory Device$')
-  FILLED=$($TMO dmidecode -t memory 2>/dev/null | awk '/^\tSize:/ && $2 != "No" {c++} END{print c+0}')
+  SLOTS=$("${TMO[@]}" dmidecode -t memory 2>/dev/null | grep -c '^Memory Device$')
+  FILLED=$("${TMO[@]}" dmidecode -t memory 2>/dev/null | awk '/^\tSize:/ && $2 != "No" {c++} END{print c+0}')
   kv "DIMM slots (filled / total)" "$FILLED / $SLOTS"
-  MAXCAP=$($TMO dmidecode -t 16 2>/dev/null | awk -F: '/Maximum Capacity/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+  MAXCAP=$("${TMO[@]}" dmidecode -t 16 2>/dev/null | awk -F: '/Maximum Capacity/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
   kv "Max supported" "${MAXCAP:-$NA}"
 fi
 echo
 
 if is_root && have dmidecode; then
-  MODLINES=$($TMO dmidecode -t memory 2>/dev/null | awk '
+  MODLINES=$("${TMO[@]}" dmidecode -t memory 2>/dev/null | awk '
     function emit() {
       if (size != "" && size !~ /^No/) printf "| %s | %s | %s | %s | %s |\n", loc, size, sp, mf, pn
     }
@@ -243,7 +252,7 @@ if have lsblk; then
   # -P (key="value") is used deliberately: plain columnar output collapses
   # empty MODEL/SERIAL fields and silently shifts every later column.
   fld() { printf '%s' "$2" | sed -n "s/.*[[:space:]]\{0,\}$1=\"\([^\"]*\)\".*/\1/p"; }
-  $TMO lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null \
+  "${TMO[@]}" lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null \
     | grep -Ev 'NAME="(loop|ram|zram|sr)[0-9]*"|NAME="zd[0-9][0-9]*"' \
     | grep -F 'TYPE="disk"' \
     | while IFS= read -r line; do
@@ -272,7 +281,7 @@ if have smartctl && [ -n "$DISKS" ]; then
     for d in $DISKS; do
       # -n standby: if the drive is spun down, report and move on rather than
       # waking it. Matters on a NAS with spun-down array disks.
-      SM=$(timeout 15 smartctl -n standby -H -A -d auto "/dev/$d" 2>/dev/null || true)
+      SM=$(tmo 15 smartctl -n standby -H -A -d auto "/dev/$d" 2>/dev/null || true)
       if printf '%s' "$SM" | grep -qi 'STANDBY mode'; then
         printf '| /dev/%s | (standby — not woken) | %s | %s | %s | %s |\n' "$d" "$NA" "$NA" "$NA" "$NA"
         continue
@@ -298,9 +307,9 @@ if have smartctl && [ -n "$DISKS" ]; then
         "$d" "${health:-$NA}" "${poh:-$NA}" "$rp" "${wear:-$NA}" "${tmp:-$NA}"
     done
     echo
-    if timeout 15 smartctl --scan 2>/dev/null | grep -q .; then
+    if tmo 15 smartctl --scan 2>/dev/null | grep -q .; then
       printf '**`smartctl --scan` sees:**\n\n```\n'
-      timeout 15 smartctl --scan 2>/dev/null | head -40
+      tmo 15 smartctl --scan 2>/dev/null | head -40
       printf '```\n\n'
     fi
     printf '_Drives behind a hardware RAID controller do not appear above — see the RAID controller section._\n\n'
@@ -311,7 +320,7 @@ fi
 # Hardware RAID (Dell PERC, LSI/Broadcom MegaRAID, HP Smart Array).
 # Vendor CLIs are invoked with `show` verbs only. Never add/delete/set/start.
 RAIDCTL=""
-have lspci && RAIDCTL=$($TMO lspci 2>/dev/null | grep -iE 'MegaRAID|PERC|LSI.*RAID|Smart Array|cciss|RAID bus controller' | head -4)
+have lspci && RAIDCTL=$("${TMO[@]}" lspci 2>/dev/null | grep -iE 'MegaRAID|PERC|LSI.*RAID|Smart Array|cciss|RAID bus controller' | head -4)
 
 if [ -n "$RAIDCTL" ]; then
   printf '### RAID controller\n\n```\n%s\n```\n\n' "$RAIDCTL"
@@ -325,21 +334,21 @@ if [ -n "$RAIDCTL" ]; then
     # /call = all controllers, /vall = all virtual drives, /eall/sall = all
     # physical drives on all enclosures. All read-only.
     printf '#### Controller and array topology\n\n```\n'
-    timeout 25 "$RCLI" /call show 2>/dev/null | head -45
+    tmo 25 "$RCLI" /call show 2>/dev/null | head -45
     echo
     echo "--- virtual drives ---"
-    timeout 25 "$RCLI" /call/vall show 2>/dev/null | head -45
+    tmo 25 "$RCLI" /call/vall show 2>/dev/null | head -45
     echo
     echo "--- physical drives ---"
-    timeout 25 "$RCLI" /call/eall/sall show 2>/dev/null | head -70
+    tmo 25 "$RCLI" /call/eall/sall show 2>/dev/null | head -70
     printf '```\n\n'
   elif have megacli || have MegaCli64; then
     MCLI=$(command -v megacli 2>/dev/null || command -v MegaCli64 2>/dev/null)
     printf '#### Controller and array topology (MegaCLI)\n\n```\n'
-    timeout 25 "$MCLI" -LDInfo -Lall -aALL -NoLog 2>/dev/null | head -60
+    tmo 25 "$MCLI" -LDInfo -Lall -aALL -NoLog 2>/dev/null | head -60
     echo
     echo "--- physical drives ---"
-    timeout 25 "$MCLI" -PDList -aALL -NoLog 2>/dev/null \
+    tmo 25 "$MCLI" -PDList -aALL -NoLog 2>/dev/null \
       | grep -E 'Slot Number|Inquiry Data|Raw Size|Firmware state|Media Error|Other Error|Predictive|Drive Temperature' \
       | head -90
     printf '```\n\n'
@@ -358,7 +367,7 @@ if [ -n "$RAIDCTL" ]; then
     if [ -n "$MRTGT" ]; then
       MRROWS=""; misses=0
       for n in {0..31}; do
-        MS=$(timeout 6 smartctl -n standby -H -A -d "megaraid,$n" "/dev/$MRTGT" 2>/dev/null || true)
+        MS=$(tmo 6 smartctl -n standby -H -A -d "megaraid,$n" "/dev/$MRTGT" 2>/dev/null || true)
         if ! printf '%s' "$MS" | grep -qiE '^Device Model:|^Model Number:|^Product:|^Serial Number:'; then
           misses=$((misses + 1))
           # Device IDs can be sparse; give up only after a long empty run.
@@ -476,29 +485,29 @@ printf '### Storage — filesystems and pools\n\n'
 printf '```\n'
 if have df; then
   echo "--- df -hT ---"
-  $TMO df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | head -60
+  "${TMO[@]}" df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | head -60
 fi
 if have findmnt; then
   echo
   echo "--- findmnt (mount options) ---"
-  $TMO findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | head -60
+  "${TMO[@]}" findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | head -60
 fi
 if have zpool; then
   echo
   echo "--- zpool list ---"
-  timeout 20 zpool list 2>/dev/null
+  tmo 20 zpool list 2>/dev/null
   echo "--- zpool status -x ---"
-  timeout 20 zpool status -x 2>/dev/null
+  tmo 20 zpool status -x 2>/dev/null
 fi
 if have btrfs; then
   echo
   echo "--- btrfs filesystem show ---"
-  $TMO btrfs filesystem show 2>/dev/null | head -20
+  "${TMO[@]}" btrfs filesystem show 2>/dev/null | head -20
 fi
 if have pvesm; then
   echo
   echo "--- pvesm status ---"
-  $TMO pvesm status 2>/dev/null
+  "${TMO[@]}" pvesm status 2>/dev/null
 fi
 printf '```\n\n'
 
@@ -508,18 +517,18 @@ if ! have ip; then
   printf '`ip` (iproute2) not available — record interfaces manually.\n\n'
 else
   printf '| Interface | State | MAC | Addresses | Link speed |\n|---|---|---|---|---|\n'
-  $TMO ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | while read -r ifc; do
+  "${TMO[@]}" ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | while read -r ifc; do
     [ "$ifc" = "lo" ] && continue
     state=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "$NA")
     mac=$(cat "/sys/class/net/$ifc/address" 2>/dev/null || echo "$NA")
-    addrs=$($TMO ip -o -4 addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | paste -sd', ' -)
+    addrs=$("${TMO[@]}" ip -o -4 addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | paste -sd', ' -)
     [ -z "$addrs" ] && addrs="$NA"
     spd=$(cat "/sys/class/net/$ifc/speed" 2>/dev/null)
     if [ -n "$spd" ] && [ "$spd" -gt 0 ] 2>/dev/null; then spd="${spd} Mb/s"; else spd="$NA"; fi
     printf '| %s | %s | %s | %s | %s |\n' "$ifc" "$state" "$mac" "$addrs" "$spd"
   done
   echo
-  DEFRT=$($TMO ip route show default 2>/dev/null | head -1)
+  DEFRT=$("${TMO[@]}" ip route show default 2>/dev/null | head -1)
   [ -n "$DEFRT" ] && printf 'Default route: `%s`\n\n' "$DEFRT"
   if [ -r /etc/resolv.conf ]; then
     printf 'Resolvers: `%s`\n\n' "$(awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null | paste -sd', ' -)"
@@ -531,7 +540,7 @@ fi
 # than the human-readable name when diagnosing a driver problem.
 if have lspci; then
   printf '### Notable PCI devices\n\n```\n'
-  $TMO lspci -nnk 2>/dev/null | awk '
+  "${TMO[@]}" lspci -nnk 2>/dev/null | awk '
     /^[0-9a-f][0-9a-f]:/ { keep = (tolower($0) ~ /vga|3d controller|display|ethernet|network|raid|sata|non-volatile|serial attached/) }
     keep
   ' | head -60
@@ -546,20 +555,20 @@ fi
 if have ipmitool && is_root && { [ -e /dev/ipmi0 ] || [ -e /dev/ipmi/0 ] || [ -e /dev/ipmidev/0 ]; }; then
   printf '### BMC / IPMI (iDRAC, iLO)\n\n'
 
-  MCINFO=$(timeout 15 ipmitool mc info 2>/dev/null \
+  MCINFO=$(tmo 15 ipmitool mc info 2>/dev/null \
     | grep -E 'Manufacturer Name|Product Name|Firmware Revision|IPMI Version' | head -6)
   [ -n "$MCINFO" ] && printf '```\n%s\n```\n\n' "$MCINFO"
 
   # Community strings and auth settings are filtered out deliberately.
-  LANINFO=$(timeout 15 ipmitool lan print 1 2>/dev/null \
+  LANINFO=$(tmo 15 ipmitool lan print 1 2>/dev/null \
     | grep -viE 'community|password|cipher|auth type' \
     | grep -E 'IP Address|Subnet Mask|MAC Address|Default Gateway' | head -8)
   [ -n "$LANINFO" ] && printf '**BMC network**\n\n```\n%s\n```\n\n' "$LANINFO"
 
-  SENS=$(timeout 30 ipmitool sdr elist 2>/dev/null | grep -viE '\| ns \|' | head -45)
+  SENS=$(tmo 30 ipmitool sdr elist 2>/dev/null | grep -viE '\| ns \|' | head -45)
   [ -n "$SENS" ] && printf '**Sensors**\n\n```\n%s\n```\n\n' "$SENS"
 
-  SEL=$(timeout 25 ipmitool sel list 2>/dev/null | tail -15)
+  SEL=$(tmo 25 ipmitool sel list 2>/dev/null | tail -15)
   [ -n "$SEL" ] && printf '**System event log (last 15 entries)**\n\n```\n%s\n```\n\n' "$SEL"
 elif have ipmitool && is_root; then
   printf '### BMC / IPMI\n\n'
@@ -567,7 +576,7 @@ elif have ipmitool && is_root; then
 fi
 
 if have racadm && is_root; then
-  RAC=$(timeout 20 racadm getsysinfo 2>/dev/null \
+  RAC=$(tmo 20 racadm getsysinfo 2>/dev/null \
     | grep -viE 'password|community' | head -35)
   if [ -n "$RAC" ]; then
     printf '### racadm getsysinfo\n\n```\n%s\n```\n\n' "$RAC"
@@ -579,7 +588,7 @@ if have pveversion || have pct || have qm; then
   printf '### Proxmox\n\n'
 
   if have pveversion; then
-    PVEV=$(timeout 15 pveversion -v 2>/dev/null | head -30)
+    PVEV=$(tmo 15 pveversion -v 2>/dev/null | head -30)
     [ -n "$PVEV" ] && printf '#### Package versions\n\n```\n%s\n```\n\n' "$PVEV"
   fi
 
@@ -588,12 +597,12 @@ if have pveversion || have pct || have qm; then
 
   # ---- LXC containers ----
   if have pct; then
-    CTIDS=$(timeout 20 pct list 2>/dev/null | awk 'NR>1{print $1}')
+    CTIDS=$(tmo 20 pct list 2>/dev/null | awk 'NR>1{print $1}')
     CTROWS=""
     for id in $CTIDS; do
-      CFG=$(timeout 10 pct config "$id" 2>/dev/null || true)
+      CFG=$(tmo 10 pct config "$id" 2>/dev/null || true)
       [ -z "$CFG" ] && continue
-      st=$(timeout 10 pct status "$id" 2>/dev/null | awk '{print $2}')
+      st=$(tmo 10 pct status "$id" 2>/dev/null | awk '{print $2}')
       net0=$(cfgget net0)
       ctip=$(printf '%s' "$net0" | sed -n 's/.*ip=\([^,]*\).*/\1/p')
       ctbr=$(printf '%s' "$net0" | sed -n 's/.*bridge=\([^,]*\).*/\1/p')
@@ -612,12 +621,12 @@ if have pveversion || have pct || have qm; then
 
   # ---- QEMU VMs ----
   if have qm; then
-    VMIDS=$(timeout 20 qm list 2>/dev/null | awk 'NR>1{print $1}')
+    VMIDS=$(tmo 20 qm list 2>/dev/null | awk 'NR>1{print $1}')
     VMROWS=""
     for id in $VMIDS; do
-      CFG=$(timeout 10 qm config "$id" 2>/dev/null || true)
+      CFG=$(tmo 10 qm config "$id" 2>/dev/null || true)
       [ -z "$CFG" ] && continue
-      vst=$(timeout 10 qm status "$id" 2>/dev/null | awk '{print $2}')
+      vst=$(tmo 10 qm status "$id" 2>/dev/null | awk '{print $2}')
       vdisks=$(printf '%s\n' "$CFG" | grep -E '^(scsi|virtio|sata|ide)[0-9]+:' \
         | grep -v 'media=cdrom' | sed 's/: /=/' | paste -sd'; ' -)
       vnet=$(printf '%s\n' "$CFG" | grep -E '^net[0-9]+:' | sed 's/: /=/' | paste -sd'; ' -)
@@ -632,25 +641,25 @@ if have pveversion || have pct || have qm; then
   fi
 
   if have pvecm; then
-    CLU=$(timeout 15 pvecm status 2>/dev/null | head -20)
+    CLU=$(tmo 15 pvecm status 2>/dev/null | head -20)
     [ -n "$CLU" ] && printf '#### Cluster\n\n```\n%s\n```\n\n' "$CLU"
   fi
 fi
 
 # ---------------------------------------------------------------- DOCKER ----
-if have docker && $TMO docker info >/dev/null 2>&1; then
+if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
   printf '### Docker\n\n```\n'
-  $TMO docker version --format 'Docker {{.Server.Version}}' 2>/dev/null
+  "${TMO[@]}" docker version --format 'Docker {{.Server.Version}}' 2>/dev/null
   echo
-  $TMO docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | head -100
+  "${TMO[@]}" docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | head -100
   printf '```\n\n'
   # Network + container IP for every container in one call. docker inspect
   # is read-only; container names are whitespace-free by construction, same
   # as the device/VMID lists elsewhere in this script.
-  CNAMES=$($TMO docker ps -a --format '{{.Names}}' 2>/dev/null | head -100)
+  CNAMES=$("${TMO[@]}" docker ps -a --format '{{.Names}}' 2>/dev/null | head -100)
   if [ -n "$CNAMES" ]; then
     # shellcheck disable=SC2086
-    DNET=$(timeout 15 docker inspect -f '{{.Name}}|{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{if $v.IPAddress}}{{$v.IPAddress}}{{else}}—{{end}} {{end}}' $CNAMES 2>/dev/null \
+    DNET=$(tmo 15 docker inspect -f '{{.Name}}|{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{if $v.IPAddress}}{{$v.IPAddress}}{{else}}—{{end}} {{end}}' $CNAMES 2>/dev/null \
       | sed 's#^/##' \
       | awk -F'|' 'NF==2 && $2!=""{printf "| %s | %s |\n", $1, $2}')
   fi
@@ -661,7 +670,7 @@ fi
 
 # ---------------------------------------------------------------- SERVICES --
 if have systemctl; then
-  FAILED=$($TMO systemctl --failed --no-legend --no-pager 2>/dev/null | head -20)
+  FAILED=$("${TMO[@]}" systemctl --failed --no-legend --no-pager 2>/dev/null | head -20)
   printf '### Failed systemd units\n\n'
   if [ -n "$FAILED" ]; then
     printf '```\n%s\n```\n\n' "$FAILED"
