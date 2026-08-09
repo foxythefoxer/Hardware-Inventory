@@ -51,9 +51,14 @@ else
   ok "no writes to /proc, /sys, /dev"
 fi
 
-grep -qE '\bset -e|\bset -o pipefail' "$SCRIPT" \
-  && bad "set -e / pipefail present (see docs/reviews/DISPOSITIONS.md)" \
-  || ok "set -e and pipefail correctly absent"
+# Same strip() as the banned-verbs check above: a comment that names
+# `set -o pipefail` to explain why it's avoided (see cap() in the script)
+# is documentation, not the directive itself.
+if strip | grep -qE '\bset -e|\bset -o pipefail'; then
+  bad "set -e / pipefail present (see docs/reviews/DISPOSITIONS.md)"
+else
+  ok "set -e and pipefail correctly absent"
+fi
 
 # ----------------------------------------------------------------- T2 clean --
 head_ "T2  Clean run on an ordinary host"
@@ -221,6 +226,107 @@ grep -q 'rd.iscsi.password=REDACTED' "$TMP/k.md" \
   && ok "name-based redaction still applies" || bad "rd.iscsi.password not redacted"
 grep -q 'rd.iscsi.initiator=iqn.1994-05' "$TMP/k.md" \
   && ok "non-secret iscsi params untouched" || bad "over-redacted rd.iscsi.initiator"
+
+# ------------------------------------------------------------ T10 cap() ------
+# F-014. systemctl --failed exercises cap() via SYSTEMD_FAILED_LINES=20: no
+# root gate, plain fenced text, easy to script both directions with.
+head_ "T10  Output-cap markers (cap())"
+
+mkdir -p "$TMP/capbin-over" "$TMP/capbin-under"
+
+{
+  printf '#!/bin/sh\n'
+  printf 'for i in $(seq 1 25); do printf "bad%%d.service loaded failed failed Bad unit %%d\\n" "$i" "$i"; done\n'
+} > "$TMP/capbin-over/systemctl"
+chmod +x "$TMP/capbin-over/systemctl"
+
+{
+  printf '#!/bin/sh\n'
+  printf 'for i in $(seq 1 3); do printf "bad%%d.service loaded failed failed Bad unit %%d\\n" "$i" "$i"; done\n'
+} > "$TMP/capbin-under/systemctl"
+chmod +x "$TMP/capbin-under/systemctl"
+
+PATH="$TMP/capbin-over:$PATH" bash "$SCRIPT" > "$TMP/cap_over.md" 2>"$TMP/cap_over.err"
+PATH="$TMP/capbin-under:$PATH" bash "$SCRIPT" > "$TMP/cap_under.md" 2>"$TMP/cap_under.err"
+
+# Over the limit: exactly 20 real lines, then the marker, and no 21st line.
+grep -q 'bad20.service' "$TMP/cap_over.md" && ok "25-line stub: line 20 present" || bad "line 20 missing"
+grep -q 'bad21.service' "$TMP/cap_over.md" && bad "25-line stub: line 21 leaked past the cap" || ok "25-line stub: line 21 correctly absent"
+grep -q -- '--- truncated at 20 failed unit lines ---' "$TMP/cap_over.md" \
+  && ok "25-line stub: truncation marker present" || bad "25-line stub: no truncation marker"
+[ ! -s "$TMP/cap_over.err" ] && ok "25-line stub: stderr still empty" || bad "25-line stub: stderr not empty"
+
+# Under the limit: this is the one that catches the empty-section regression
+# — cap() must reproduce a bare `head -N` exactly when nothing is truncated,
+# marker included (i.e. NOT included), or every untruncated section in the
+# report grows a spurious line.
+grep -q 'bad3.service' "$TMP/cap_under.md" && ok "3-line stub: real output present" || bad "3-line stub: real output missing"
+grep -q -- '--- truncated' "$TMP/cap_under.md" \
+  && bad "3-line stub: marker present despite no truncation" || ok "3-line stub: no marker below the cap"
+UNDER_UNITS=$(grep -c '^bad[0-9]*\.service' "$TMP/cap_under.md")
+[ "$UNDER_UNITS" -eq 3 ] && ok "3-line stub: byte-identical line count (3)" || bad "3-line stub: got $UNDER_UNITS lines, expected 3"
+
+# ------------------------------------------------------- T11 CNAMES safety ---
+# F-014's sharpest edge case: CNAMES is word-split into `docker inspect`
+# arguments, so cap()'s inline marker cannot be used there without a marker
+# line becoming a bogus container name. Assert the marker is deferred to
+# after the container-networks table AND never reaches `docker inspect`.
+head_ "T11  Docker container-list cap (deferred marker)"
+
+mkdir -p "$TMP/dockerbin"
+cat > "$TMP/dockerbin/docker" << 'DOCKEREOF'
+#!/bin/sh
+case "$1" in
+  info) exit 0 ;;
+  version) echo "Docker 27.0.0" ;;
+  ps)
+    if [ "$4" = 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' ] || printf '%s' "$*" | grep -q 'table'; then
+      i=1; while [ "$i" -le 105 ]; do printf 'c%d\timg\tUp\t\n' "$i"; i=$((i+1)); done
+    else
+      i=1; while [ "$i" -le 105 ]; do printf 'c%d\n' "$i"; i=$((i+1)); done
+    fi
+    ;;
+  inspect)
+    shift
+    while [ "$1" = "-f" ]; do shift 2; done
+    # A marker word leaking in as an argument must be detectable from the
+    # FINAL REPORT, not from stderr: the real script runs this whole command
+    # under 2>/dev/null (correctly, per convention), so anything this stub
+    # writes to stderr is invisible to the test. Emit a distinctive STDOUT
+    # row instead — stdout is what flows through sed/awk into $DNET and then
+    # into the report — so the hazard is caught the same way a real leak
+    # would eventually surface: in the rendered Markdown.
+    for name in "$@"; do
+      case "$name" in
+        *truncated*|*---*)
+          echo "/MARKER-LEAKED-INTO-INSPECT:${name}|bogus=1 "
+          continue
+          ;;
+      esac
+      echo "/$name|bridge=198.51.100.1 "
+    done
+    ;;
+esac
+DOCKEREOF
+chmod +x "$TMP/dockerbin/docker"
+
+PATH="$TMP/dockerbin:$PATH" bash "$SCRIPT" > "$TMP/dock.md" 2>"$TMP/dock.err"
+
+grep -q 'MARKER-LEAKED-INTO-INSPECT' "$TMP/dock.md" \
+  && bad "marker text was passed to docker inspect as a container name" \
+  || ok "marker text never reached docker inspect"
+grep -q 'container network lookups capped at 100 containers' "$TMP/dock.md" \
+  && ok "deferred marker present after the Docker section" || bad "deferred marker missing"
+# The VISIBLE container table (site 813) is a normal cap() consumer — it is
+# only CNAMES (818, word-split into docker inspect args) that cannot use an
+# inline marker. With 105 stub containers this table legitimately truncates,
+# so its own "--- truncated ---" line is expected, not a leak.
+grep -q -- '--- truncated at 100 container lines ---' "$TMP/dock.md" \
+  && ok "container table still gets its own inline cap() marker" || bad "container table marker missing"
+# The deferred marker must come after the container-networks table, not
+# inside it — the table is Markdown, and this marker would corrupt a row.
+awk '/Container networks/{t=NR} /container network lookups capped/{m=NR} END{exit !(t>0 && m>0 && m>t)}' "$TMP/dock.md" \
+  && ok "deferred marker placed after the container-networks table" || bad "deferred marker placed before or inside the table"
 
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

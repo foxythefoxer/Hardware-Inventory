@@ -29,6 +29,112 @@
 set -u
 export LC_ALL=C
 
+# ------------------------------------------------------- output-cap limits --
+# Every `head -N` that truncates real, potentially-large output (as opposed
+# to extracting a single known-shape value — see the bare `head -1` sites at
+# dmi(), the Proxmox VE identity line, and the default route) has a named
+# constant here, consumed through cap() below instead of head directly, so a
+# hit limit grows a visible marker instead of vanishing silently (F-014).
+#
+# Two sites that share a NUMBER are not merged into one constant unless they
+# also share a PURPOSE: MegaCLI's physical-drive listing and df's table cap
+# both happen to land on 60/90-ish values, but they are unrelated knobs a
+# future change should be able to retune independently.
+
+# SMART
+SMART_SCAN_LINES=40          # `smartctl --scan` enumerates every device it can
+                              # see, not just $DISKS — generous headroom for a
+                              # host with several controllers attached.
+
+# RAID controller / vendor CLI
+RAID_CTRL_LINES=4            # lspci lines matching a RAID-controller string;
+                              # a host would need 5+ distinct controllers to
+                              # hit this, effectively a sanity bound.
+RAID_CLI_SUMMARY_LINES=45    # perccli/storcli controller info and virtual-
+                              # drive listing (/call show, /call/vall show).
+RAID_CLI_DRIVES_LINES=70     # perccli/storcli physical-drive listing
+                              # (/call/eall/sall show) — scales with drive
+                              # count, so more headroom than the summary.
+MEGACLI_LD_LINES=60          # MegaCLI logical/virtual drive listing.
+MEGACLI_PD_LINES=90          # MegaCLI physical-drive listing — one block of
+                              # named fields per drive, so this scales with
+                              # drive count, unlike the IPMI field caps below.
+
+# Filesystems and pools
+FS_TABLE_LINES=60            # df -hT and findmnt real-mount tables.
+FS_BTRFS_LINES=20            # `btrfs filesystem show` — compact even with
+                              # several volumes, so a smaller cap than df/findmnt.
+
+# PCI
+PCI_DEVICE_LINES=60          # notable PCI devices, after the
+                              # vga|3d|ethernet|... keep filter.
+
+# IPMI / BMC
+IPMI_IDENTITY_LINES=6        # `ipmitool mc info` grepped for 4 named fields
+                              # (Manufacturer/Product/Firmware/IPMI Version).
+                              # Tracks an expected FIELD count, not an
+                              # open-ended corpus — headroom is for a field
+                              # appearing twice, not for "more BMCs".
+IPMI_LAN_LINES=8             # `ipmitool lan print` grepped for 4 named
+                              # fields; same reasoning as IPMI_IDENTITY_LINES.
+                              # The grep patterns can each match more than one
+                              # line (e.g. "IP Address" also matches inside
+                              # "Default Gateway IP Address"), hence 2x.
+IPMI_SENSOR_LINES=45         # `ipmitool sdr elist` — a big server can have
+                              # dozens of sensors; this one IS a real corpus cap.
+RACADM_LINES=35              # `racadm getsysinfo`.
+
+# Proxmox
+PVE_VERSIONS_LINES=30        # `pveversion -v` package list.
+PVE_CLUSTER_LINES=20         # `pvecm status`.
+
+# Docker — shared by the visible container table and the container-name list
+# that drives the network-IP lookup loop. See the CNAMES site in the Docker
+# section for why the latter cannot use cap()'s inline marker.
+DOCKER_LIST_LIMIT=100
+
+# systemd
+SYSTEMD_FAILED_LINES=20      # `systemctl --failed`.
+
+# cap N noun — read stdin, emit at most N lines, and if there was a
+# truncated (N+1)th line, append one "--- truncated at N noun ---" marker,
+# matching the "--- xyz ---" divider style already used throughout this file
+# for meta-commentary lines inside a fenced block.
+#
+# Built on `head -$((N+1))`, not a read loop: cap's own `head` subprocess is
+# what's attached to the incoming pipe, so it closes its read end after N+1
+# lines exactly like a bare `head -N` would, and a slow upstream producer
+# (smartctl, ipmitool, perccli) still gets SIGPIPE and exits promptly. The
+# `set -o pipefail` rejection in CLAUDE.md rests on that early-close behaviour
+# continuing to hold; a manual read loop would not preserve it.
+#
+# Zero lines in -> zero lines out, marker included: sections are captured to
+# a variable and printed only if non-empty (see Conventions in CLAUDE.md),
+# and a marker on empty input would defeat that at every call site at once —
+# a host with no RAID controller would grow a "truncated" note where nothing
+# should print at all.
+#
+# Never calls warn(): truncation is not a collector failure, the tool ran and
+# answered. warn() could not be called from here safely regardless — cap runs
+# as the tail of a pipeline, which is a subshell, and a warn() mutation from
+# inside one is silently lost (G-002, docs/reviews/DISPOSITIONS.md).
+#
+# Not used for the Docker CNAMES site: that list is word-split into
+# `docker inspect` arguments downstream, so a marker line appended to its
+# output would be passed as a bogus container name. See that site instead.
+cap() {
+  local n=$1 noun=$2
+  local out
+  out=$(head -n "$((n + 1))")
+  [ -z "$out" ] && return
+  local total
+  total=$(printf '%s\n' "$out" | wc -l)
+  printf '%s\n' "$out" | head -n "$n"
+  if [ "$total" -gt "$n" ]; then
+    printf -- '--- truncated at %d %s ---\n' "$n" "$noun"
+  fi
+}
+
 have() { command -v "$1" >/dev/null 2>&1; }
 NA="—"
 
@@ -398,7 +504,7 @@ if have smartctl && [ -n "$DISKS" ]; then
     echo
     if tmo 15 smartctl --scan 2>/dev/null | grep -q .; then
       printf '**`smartctl --scan` sees:**\n\n```\n'
-      tmo 15 smartctl --scan 2>/dev/null | head -40
+      tmo 15 smartctl --scan 2>/dev/null | cap "$SMART_SCAN_LINES" "scan lines"
       printf '```\n\n'
     fi
     printf '_Drives behind a hardware RAID controller do not appear above — see the RAID controller section._\n\n'
@@ -416,7 +522,7 @@ if have lspci; then
   # the PCI bus was never enumerated, so "no controller found" below would be
   # an assertion this host has none, which is exactly the wrong answer.
   [ -z "$LSPCI_RAW" ] && warn '`lspci` is installed but enumerated no PCI devices — the RAID controller and PCI sections cannot be trusted as "none present".'
-  RAIDCTL=$(printf '%s\n' "$LSPCI_RAW" | grep -iE 'MegaRAID|PERC|LSI.*RAID|Smart Array|cciss|RAID bus controller' | head -4)
+  RAIDCTL=$(printf '%s\n' "$LSPCI_RAW" | grep -iE 'MegaRAID|PERC|LSI.*RAID|Smart Array|cciss|RAID bus controller' | cap "$RAID_CTRL_LINES" "RAID controller matches")
 fi
 
 if [ -n "$RAIDCTL" ]; then
@@ -431,23 +537,23 @@ if [ -n "$RAIDCTL" ]; then
     # /call = all controllers, /vall = all virtual drives, /eall/sall = all
     # physical drives on all enclosures. All read-only.
     printf '#### Controller and array topology\n\n```\n'
-    tmo 25 "$RCLI" /call show 2>/dev/null | head -45
+    tmo 25 "$RCLI" /call show 2>/dev/null | cap "$RAID_CLI_SUMMARY_LINES" "controller summary lines"
     echo
     echo "--- virtual drives ---"
-    tmo 25 "$RCLI" /call/vall show 2>/dev/null | head -45
+    tmo 25 "$RCLI" /call/vall show 2>/dev/null | cap "$RAID_CLI_SUMMARY_LINES" "virtual drive lines"
     echo
     echo "--- physical drives ---"
-    tmo 25 "$RCLI" /call/eall/sall show 2>/dev/null | head -70
+    tmo 25 "$RCLI" /call/eall/sall show 2>/dev/null | cap "$RAID_CLI_DRIVES_LINES" "physical drive lines"
     printf '```\n\n'
   elif have megacli || have MegaCli64; then
     MCLI=$(command -v megacli 2>/dev/null || command -v MegaCli64 2>/dev/null)
     printf '#### Controller and array topology (MegaCLI)\n\n```\n'
-    tmo 25 "$MCLI" -LDInfo -Lall -aALL -NoLog 2>/dev/null | head -60
+    tmo 25 "$MCLI" -LDInfo -Lall -aALL -NoLog 2>/dev/null | cap "$MEGACLI_LD_LINES" "logical drive lines"
     echo
     echo "--- physical drives ---"
     tmo 25 "$MCLI" -PDList -aALL -NoLog 2>/dev/null \
       | grep -E 'Slot Number|Inquiry Data|Raw Size|Firmware state|Media Error|Other Error|Predictive|Drive Temperature' \
-      | head -90
+      | cap "$MEGACLI_PD_LINES" "physical drive lines"
     printf '```\n\n'
   else
     printf '_No vendor CLI found. Install `perccli64` (Dell) or `storcli64` (Broadcom) for array topology — neither is required for the per-drive SMART below._\n\n'
@@ -586,14 +692,14 @@ printf '### Storage — filesystems and pools\n\n'
 printf '```\n'
 if have df; then
   echo "--- df -hT ---"
-  DFOUT=$("${TMO[@]}" df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | head -60)
+  DFOUT=$("${TMO[@]}" df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | cap "$FS_TABLE_LINES" "filesystem table lines")
   printf '%s\n' "$DFOUT"
   [ -z "$DFOUT" ] && warn '`df` is installed but reported no real filesystems.'
 fi
 if have findmnt; then
   echo
   echo "--- findmnt (mount options) ---"
-  FMOUT=$("${TMO[@]}" findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | head -60)
+  FMOUT=$("${TMO[@]}" findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | cap "$FS_TABLE_LINES" "filesystem table lines")
   printf '%s\n' "$FMOUT"
   [ -z "$FMOUT" ] && warn '`findmnt` is installed but listed no mounted filesystems.'
 fi
@@ -613,7 +719,7 @@ fi
 if have btrfs; then
   echo
   echo "--- btrfs filesystem show ---"
-  "${TMO[@]}" btrfs filesystem show 2>/dev/null | head -20
+  "${TMO[@]}" btrfs filesystem show 2>/dev/null | cap "$FS_BTRFS_LINES" "btrfs filesystem lines"
 fi
 if have pvesm; then
   echo
@@ -666,7 +772,7 @@ if have lspci; then
   PCIOUT=$("${TMO[@]}" lspci -nnk 2>/dev/null | awk '
     /^[0-9a-f][0-9a-f]:/ { keep = (tolower($0) ~ /vga|3d controller|display|ethernet|network|raid|sata|non-volatile|serial attached/) }
     keep
-  ' | head -60)
+  ' | cap "$PCI_DEVICE_LINES" "PCI device lines")
   printf '%s\n' "$PCIOUT"
   printf '```\n\n'
   # Only warn when plain lspci worked — otherwise the probe above already did,
@@ -685,7 +791,7 @@ if have ipmitool && is_root && { [ -e /dev/ipmi0 ] || [ -e /dev/ipmi/0 ] || [ -e
   printf '### BMC / IPMI (iDRAC, iLO)\n\n'
 
   MCINFO=$(tmo 15 ipmitool mc info 2>/dev/null \
-    | grep -E 'Manufacturer Name|Product Name|Firmware Revision|IPMI Version' | head -6)
+    | grep -E 'Manufacturer Name|Product Name|Firmware Revision|IPMI Version' | cap "$IPMI_IDENTITY_LINES" "BMC identity lines")
   # The gate above already confirmed root and a live IPMI device node, so a
   # BMC that will not identify itself is a real failure, not absent hardware.
   if [ -n "$MCINFO" ]; then
@@ -697,10 +803,10 @@ if have ipmitool && is_root && { [ -e /dev/ipmi0 ] || [ -e /dev/ipmi/0 ] || [ -e
   # Community strings and auth settings are filtered out deliberately.
   LANINFO=$(tmo 15 ipmitool lan print 1 2>/dev/null \
     | grep -viE 'community|password|cipher|auth type' \
-    | grep -E 'IP Address|Subnet Mask|MAC Address|Default Gateway' | head -8)
+    | grep -E 'IP Address|Subnet Mask|MAC Address|Default Gateway' | cap "$IPMI_LAN_LINES" "BMC network lines")
   [ -n "$LANINFO" ] && printf '**BMC network**\n\n```\n%s\n```\n\n' "$LANINFO"
 
-  SENS=$(tmo 30 ipmitool sdr elist 2>/dev/null | grep -viE '\| ns \|' | head -45)
+  SENS=$(tmo 30 ipmitool sdr elist 2>/dev/null | grep -viE '\| ns \|' | cap "$IPMI_SENSOR_LINES" "sensor lines")
   [ -n "$SENS" ] && printf '**Sensors**\n\n```\n%s\n```\n\n' "$SENS"
 
   SEL=$(tmo 25 ipmitool sel list 2>/dev/null | tail -15)
@@ -712,7 +818,7 @@ fi
 
 if have racadm && is_root; then
   RAC=$(tmo 20 racadm getsysinfo 2>/dev/null \
-    | grep -viE 'password|community' | head -35)
+    | grep -viE 'password|community' | cap "$RACADM_LINES" "racadm lines")
   if [ -n "$RAC" ]; then
     printf '### racadm getsysinfo\n\n```\n%s\n```\n\n' "$RAC"
   fi
@@ -723,7 +829,7 @@ if have pveversion || have pct || have qm; then
   printf '### Proxmox\n\n'
 
   if have pveversion; then
-    PVEV=$(tmo 15 pveversion -v 2>/dev/null | head -30)
+    PVEV=$(tmo 15 pveversion -v 2>/dev/null | cap "$PVE_VERSIONS_LINES" "package version lines")
     if [ -n "$PVEV" ]; then
       printf '#### Package versions\n\n```\n%s\n```\n\n' "$PVEV"
     else
@@ -794,7 +900,7 @@ if have pveversion || have pct || have qm; then
   # was never joined to a cluster, which is a normal Proxmox install, not a
   # collection failure. Do not "fix" this by adding one.
   if have pvecm; then
-    CLU=$(tmo 15 pvecm status 2>/dev/null | head -20)
+    CLU=$(tmo 15 pvecm status 2>/dev/null | cap "$PVE_CLUSTER_LINES" "cluster status lines")
     [ -n "$CLU" ] && printf '#### Cluster\n\n```\n%s\n```\n\n' "$CLU"
   fi
 fi
@@ -810,12 +916,28 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
   printf '%s\n' "$DVER"
   [ -z "$DVER" ] && warn '`docker version` returned nothing although the daemon answered `docker info`.'
   echo
-  "${TMO[@]}" docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | head -100
+  "${TMO[@]}" docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | cap "$DOCKER_LIST_LIMIT" "container lines"
   printf '```\n\n'
   # Network + container IP for every container in one call. docker inspect
   # is read-only; container names are whitespace-free by construction, same
   # as the device/VMID lists elsewhere in this script.
-  CNAMES=$("${TMO[@]}" docker ps -a --format '{{.Names}}' 2>/dev/null | head -100)
+  #
+  # Deliberately NOT run through cap(): CNAMES is word-split into docker
+  # inspect's argument list below, so cap()'s trailing "--- truncated ---"
+  # marker would be passed as a bogus container name and either error out or
+  # silently desync the NF==2 parsing that follows. The full (uncapped) list
+  # is read first instead — docker ps terminates on its own regardless of how
+  # much of it we read, unlike the SIGPIPE-sensitive scans elsewhere in this
+  # file, so there is no early-close reason to cap the read itself — and the
+  # truncation marker for this one site is deferred to after the container
+  # networks table, where it can no longer land inside anyone's argument list.
+  CNAMES_ALL=$("${TMO[@]}" docker ps -a --format '{{.Names}}' 2>/dev/null)
+  CNAMES=$(printf '%s\n' "$CNAMES_ALL" | head -n "$DOCKER_LIST_LIMIT")
+  CNAMES_TRUNCATED=0
+  if [ -n "$CNAMES_ALL" ]; then
+    CNAMES_TOTAL=$(printf '%s\n' "$CNAMES_ALL" | wc -l)
+    [ "$CNAMES_TOTAL" -gt "$DOCKER_LIST_LIMIT" ] && CNAMES_TRUNCATED=1
+  fi
   if [ -n "$CNAMES" ]; then
     # shellcheck disable=SC2086
     DNET=$(tmo 15 docker inspect -f '{{.Name}}|{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{if $v.IPAddress}}{{$v.IPAddress}}{{else}}—{{end}} {{end}}' $CNAMES 2>/dev/null \
@@ -825,12 +947,15 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
   if [ -n "$DNET" ]; then
     printf '#### Container networks\n\n| Container | Network=IP |\n|---|---|\n%s\n\n' "$DNET"
   fi
+  if [ "$CNAMES_TRUNCATED" -eq 1 ]; then
+    printf '_(container network lookups capped at %d containers; later containers are not shown above)_\n\n' "$DOCKER_LIST_LIMIT"
+  fi
 fi
 
 # ---------------------------------------------------------------- SERVICES --
 # An empty `--failed` list is the healthy case, never a warning.
 if have systemctl; then
-  FAILED=$("${TMO[@]}" systemctl --failed --no-legend --no-pager 2>/dev/null | head -20)
+  FAILED=$("${TMO[@]}" systemctl --failed --no-legend --no-pager 2>/dev/null | cap "$SYSTEMD_FAILED_LINES" "failed unit lines")
   printf '### Failed systemd units\n\n'
   if [ -n "$FAILED" ]; then
     printf '```\n%s\n```\n\n' "$FAILED"
