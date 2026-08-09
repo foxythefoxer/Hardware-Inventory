@@ -191,7 +191,17 @@ fi
 echo
 if [ -r /proc/cmdline ]; then
   printf '**Kernel command line**\n\n```\n'
-  cat /proc/cmdline 2>/dev/null
+  # Parameter names are kept; values that look sensitive are not. Covers
+  # rd.luks.key (dracut's LUKS keyfile spec) via the generic "key" match.
+  awk '{
+    out=""
+    for (i=1;i<=NF;i++) {
+      tok=$i; name=tok; sub(/=.*/,"",name)
+      if (tok ~ /=/ && tolower(name) ~ /(password|secret|token|key)/) tok=name"=REDACTED"
+      out = (out=="") ? tok : out" "tok
+    }
+    print out
+  }' /proc/cmdline 2>/dev/null
   printf '```\n\n'
 fi
 
