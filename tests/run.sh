@@ -86,10 +86,21 @@ S=$(date +%s)
 PATH="$FIX/badbin:$PATH" timeout 180 bash "$SCRIPT" > "$TMP/h.md" 2>"$TMP/h.err"; RC=$?
 E=$(( $(date +%s) - S ))
 
-[ $RC -eq 0 ] && ok "completes (exit 0) with everything broken" \
-              || bad "exit $RC — 124 means it HUNG, find the unguarded command"
+# Since C-025/C-026 this must exit 1, not 0. Every tool here is present and
+# failing, which is precisely the case that must not read as a complete report.
+# 124 still means it HUNG — that is the defect class this test was written for,
+# and the reason the distinction below is spelled out rather than `-ne 0`.
+if [ $RC -eq 124 ]; then
+  bad "exit 124 — it HUNG, find the unguarded command"
+elif [ $RC -eq 1 ]; then
+  ok "exits 1 (collection warnings) with everything broken"
+else
+  bad "exit $RC — expected 1, every tool is broken so the report cannot be complete"
+fi
 [ "$E" -lt 90 ] && ok "finishes promptly (${E}s)" || bad "took ${E}s — a timeout guard is missing"
 grep -q 'End of report' "$TMP/h.md" && ok "still reaches footer" || bad "no footer"
+grep -q '^## Collection warnings' "$TMP/h.md" \
+  && ok "names the failed collectors" || bad "no warnings section despite everything failing"
 
 # --------------------------------------------------------------- T4 unraid ---
 head_ "T4  Unraid array parsing"
@@ -147,6 +158,45 @@ if command -v shellcheck >/dev/null 2>&1; then
 else
   printf '  \033[33mSKIP\033[0m  shellcheck not installed\n'
 fi
+
+# ------------------------------------------------------------- T8 warnings ---
+# The C-025/C-026 contract, and specifically the judgment call in it: a tool
+# that is PRESENT and fails is a warning; a tool that is ABSENT is not. Both
+# halves are asserted, because an accumulator that warns about absent hardware
+# would make every minimal host look broken and train everyone to ignore it.
+head_ "T8  Collection warnings and exit code"
+
+# --- one tool present and failing ---
+mkdir -p "$TMP/onebad"
+printf '#!/bin/sh\nexit 1\n' > "$TMP/onebad/lscpu"
+chmod +x "$TMP/onebad/lscpu"
+
+PATH="$TMP/onebad:$PATH" bash "$SCRIPT" > "$TMP/w.md" 2>"$TMP/w.err"; RC=$?
+[ $RC -eq 1 ] && ok "exits 1 when a present tool fails" || bad "exit $RC — expected 1"
+grep -q '^## Collection warnings' "$TMP/w.md" \
+  && ok "emits ## Collection warnings" || bad "no warnings section"
+grep -q 'lscpu' "$TMP/w.md" && ok "warning names the failed tool" || bad "warning does not name lscpu"
+grep -q 'End of report' "$TMP/w.md" && ok "still writes the full report" || bad "no footer"
+[ ! -s "$TMP/w.err" ] && ok "stderr still empty" || bad "stderr not empty"
+
+# --- tools absent, not failing ---
+# A PATH holding only generic utilities: every hardware tool is genuinely
+# missing, which is a minimal container or a stripped host, not a broken one.
+mkdir -p "$TMP/minbin"
+# bash and sh are in the list because the PATH= prefix below also governs how
+# `bash` itself is resolved — without them the run dies at 127 before starting.
+for u in bash sh uname hostname date id awk gawk sed grep cat head tail wc ls \
+         paste basename timeout sort tr cut; do
+  p=$(command -v "$u" 2>/dev/null) && ln -sf "$p" "$TMP/minbin/$u"
+done
+
+PATH="$TMP/minbin" bash "$SCRIPT" > "$TMP/m.md" 2>"$TMP/m.err"; RC=$?
+[ $RC -eq 0 ] && ok "exits 0 when tools are merely absent" \
+              || { bad "exit $RC — absent tools must not warn:"; \
+                   sed -n '/^## Collection warnings/,/^_/p' "$TMP/m.md" | sed 's/^/        /'; }
+grep -q '^## Collection warnings' "$TMP/m.md" \
+  && bad "absent tools produced warnings" || ok "no warnings for absent tools"
+grep -q 'End of report' "$TMP/m.md" && ok "still writes the full report" || bad "no footer"
 
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

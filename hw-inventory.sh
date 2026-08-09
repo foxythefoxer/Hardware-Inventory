@@ -16,6 +16,15 @@
 #   sudo bash hw-inventory.sh > "$(hostname)-$(date +%F).md"
 #
 # Note: run with `bash`, not `./`, and your fish shell stays out of the way.
+#
+# Exit codes (the report is written in full either way — read it, not just $?):
+#   0  collection complete
+#   1  completed, but one or more collectors failed; see `## Collection
+#      warnings` at the end of the report for which ones
+# A section skipped because the hardware or tool is genuinely absent is NOT a
+# warning. A tool that was present, permitted, and still returned nothing IS.
+# That distinction is the whole point: this output is consumed as ground truth,
+# so a silently empty section must not read as "this host has none of that".
 
 set -u
 export LC_ALL=C
@@ -35,6 +44,25 @@ have timeout && TMO=(timeout 10)
 tmo() {
   local n=$1; shift
   if have timeout; then timeout "$n" "$@"; else "$@"; fi
+}
+
+# Collection warnings. A collector that was present and permitted but returned
+# nothing appends here; the report ends with a `## Collection warnings` block
+# and the script exits 1. Accumulated as a newline-joined string rather than an
+# array so it stays safe under `set -u` on older bash, matching how MRROWS and
+# CTROWS are built below.
+#
+# warn() MUST only be called from the main shell. Pipeline bodies and command
+# substitutions run in subshells, so a warn() inside one is silently lost (see
+# G-002 in docs/reviews/DISPOSITIONS.md). Where a section's rows are produced
+# by a `... | while read` pipeline, capture the pipeline into a variable first
+# and test that variable out here — see the storage and network tables.
+WARNINGS=""
+WARNCOUNT=0
+warn() {
+  WARNCOUNT=$((WARNCOUNT + 1))
+  WARNINGS="${WARNINGS}- ${1}
+"
 }
 
 kv() { printf '| %s | %s |\n' "$1" "${2:-$NA}"; }
@@ -80,9 +108,13 @@ if have lscpu; then
   CPUMODEL=$("${TMO[@]}" lscpu 2>/dev/null | awk -F: '/^Model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
 fi
 [ -z "$CPUMODEL" ] && CPUMODEL=$(awk -F: '/model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null)
+[ -z "$CPUMODEL" ] && warn 'CPU model unknown: neither `lscpu` nor /proc/cpuinfo yielded a model name.'
 
 RAMTOTAL=""
 have free && RAMTOTAL=$(free -h 2>/dev/null | awk '/^Mem:/{print $2}')
+if have free && [ -z "$RAMTOTAL" ]; then
+  warn '`free` is installed but reported no total memory — RAM fields are empty.'
+fi
 
 PLATFORM="bare-metal"
 if have systemd-detect-virt; then
@@ -98,8 +130,16 @@ BIOS=$(dmi bios-version)
 
 # Disks, used by both the inventory table and the SMART table.
 DISKS=""
-have lsblk && DISKS=$("${TMO[@]}" lsblk -dn -o NAME,TYPE 2>/dev/null \
-  | awk '$2=="disk"{print $1}' | grep -Ev '^(loop|ram|zram|sr|zd[0-9])' || true)
+LSBLK_RAW=""
+if have lsblk; then
+  LSBLK_RAW=$("${TMO[@]}" lsblk -dn -o NAME,TYPE 2>/dev/null || true)
+  DISKS=$(printf '%s\n' "$LSBLK_RAW" \
+    | awk '$2=="disk"{print $1}' | grep -Ev '^(loop|ram|zram|sr|zd[0-9])' || true)
+  # lsblk returning nothing at all means the query failed. A host with zero
+  # block devices is not a real case; an empty DISKS after a successful lsblk
+  # (all devices filtered as zvols/loop) is, so only the raw form is checked.
+  [ -z "$LSBLK_RAW" ] && warn '`lsblk` is installed but listed no block devices — the storage and SMART sections are empty as a result.'
+fi
 
 # ============================================================ frontmatter ===
 printf -- '---\n'
@@ -142,6 +182,9 @@ if is_root && have dmidecode; then
   kv "Service tag / serial" "${SERIAL:-$NA}"
   kv "Motherboard" "${BOARD:-$NA}"
   kv "BIOS" "${BIOS:-$NA}"
+  if [ -z "$PROD" ] && [ -z "$MFR" ] && [ -z "$SERIAL" ] && [ -z "$BOARD" ]; then
+    warn '`dmidecode` returned no system identity as root — manufacturer, model, service tag and motherboard are all unknown.'
+  fi
 else
   kv "Manufacturer / model" "(needs root — install/run dmidecode as root)"
 fi
@@ -166,6 +209,7 @@ echo
 printf '### CPU\n\n| Field | Value |\n|---|---|\n'
 if have lscpu; then
   LC=$("${TMO[@]}" lscpu 2>/dev/null)
+  [ -z "$LC" ] && warn '`lscpu` is installed but returned nothing — socket, core and thread counts are missing.'
   kv "Model" "$CPUMODEL"
   kv "Sockets" "$(echo "$LC" | awk -F: '/^Socket\(s\)/{gsub(/ /,"",$2); print $2; exit}')"
   kv "Cores per socket" "$(echo "$LC" | awk -F: '/^Core\(s\) per socket/{gsub(/ /,"",$2); print $2; exit}')"
@@ -218,9 +262,17 @@ fi
 printf '### Memory\n\n| Field | Value |\n|---|---|\n'
 have free && kv "Total RAM" "$RAMTOTAL"
 have free && kv "Swap total" "$(free -h 2>/dev/null | awk '/^Swap:/{print $2}')"
+DMIMEM=""
 if is_root && have dmidecode; then
-  SLOTS=$("${TMO[@]}" dmidecode -t memory 2>/dev/null | grep -c '^Memory Device$')
-  FILLED=$("${TMO[@]}" dmidecode -t memory 2>/dev/null | awk '/^\tSize:/ && $2 != "No" {c++} END{print c+0}')
+  # Captured once: the emptiness check below needs it, and the three parses
+  # that follow previously re-ran dmidecode for each.
+  DMIMEM=$("${TMO[@]}" dmidecode -t memory 2>/dev/null)
+  SLOTS=$(printf '%s\n' "$DMIMEM" | grep -c '^Memory Device$')
+  FILLED=$(printf '%s\n' "$DMIMEM" | awk '/^\tSize:/ && $2 != "No" {c++} END{print c+0}')
+  # Keyed on the record count, not on DMIMEM being empty: a dmidecode that
+  # cannot read /dev/mem still prints a banner to stdout, so an emptiness test
+  # here would never fire on the failure it is meant to catch.
+  [ "$SLOTS" -eq 0 ] && warn '`dmidecode -t memory` reported no memory devices as root — DIMM slot counts and the module table are missing.'
   kv "DIMM slots (filled / total)" "$FILLED / $SLOTS"
   MAXCAP=$("${TMO[@]}" dmidecode -t 16 2>/dev/null | awk -F: '/Maximum Capacity/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
   kv "Max supported" "${MAXCAP:-$NA}"
@@ -228,7 +280,7 @@ fi
 echo
 
 if is_root && have dmidecode; then
-  MODLINES=$("${TMO[@]}" dmidecode -t memory 2>/dev/null | awk '
+  MODLINES=$(printf '%s\n' "$DMIMEM" | awk '
     function emit() {
       if (size != "" && size !~ /^No/) printf "| %s | %s | %s | %s | %s |\n", loc, size, sp, mf, pn
     }
@@ -248,11 +300,13 @@ fi
 # ---------------------------------------------------------------- STORAGE ---
 printf '### Storage — physical devices\n\n'
 if have lsblk; then
-  printf '| Device | Size | Model | Serial | Type | Bus |\n|---|---|---|---|---|---|\n'
   # -P (key="value") is used deliberately: plain columnar output collapses
   # empty MODEL/SERIAL fields and silently shifts every later column.
   fld() { printf '%s' "$2" | sed -n "s/.*[[:space:]]\{0,\}$1=\"\([^\"]*\)\".*/\1/p"; }
-  "${TMO[@]}" lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null \
+  # Captured rather than printed straight through: the row loop is a pipeline
+  # body, so it cannot warn() from inside (G-002). Testing the captured rows
+  # out here also keeps the header from being printed above nothing.
+  DEVROWS=$("${TMO[@]}" lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null \
     | grep -Ev 'NAME="(loop|ram|zram|sr)[0-9]*"|NAME="zd[0-9][0-9]*"' \
     | grep -F 'TYPE="disk"' \
     | while IFS= read -r line; do
@@ -263,8 +317,18 @@ if have lsblk; then
         case "$rota" in 1) kind="HDD";; 0) kind="SSD/NVMe";; *) kind="$NA";; esac
         printf '| /dev/%s | %s | %s | %s | %s | %s |\n' \
           "$name" "${size:-$NA}" "${model:-$NA}" "${serial:-$NA}" "$kind" "${tran:-$NA}"
-      done
-  echo
+      done)
+  if [ -n "$DEVROWS" ]; then
+    printf '| Device | Size | Model | Serial | Type | Bus |\n|---|---|---|---|---|---|\n'
+    printf '%s\n\n' "$DEVROWS"
+  else
+    printf '_No physical disks reported._\n\n'
+    # Only when the plain listing worked — otherwise the probe near the top
+    # already warned, and one broken lsblk should not report twice.
+    if [ -n "$LSBLK_RAW" ]; then
+      warn '`lsblk` listed block devices but none survived the physical-disk filter — the device table is empty.'
+    fi
+  fi
 else
   printf '`lsblk` not available — list disks manually.\n\n'
 fi
@@ -278,15 +342,22 @@ if have smartctl && [ -n "$DISKS" ]; then
     printf '_Not run as root — SMART data unavailable._\n\n'
   else
     printf '| Device | Health | Power-on hrs | Realloc / Pending | Wear | Temp |\n|---|---|---|---|---|---|\n'
+    # This is a plain for loop in the main shell, not a pipeline body, so the
+    # counter survives — see the note on warn().
+    SMOK=0; SMTOTAL=0
     for d in $DISKS; do
+      SMTOTAL=$((SMTOTAL + 1))
       # -n standby: if the drive is spun down, report and move on rather than
       # waking it. Matters on a NAS with spun-down array disks.
       SM=$(tmo 15 smartctl -n standby -H -A -d auto "/dev/$d" 2>/dev/null || true)
       if printf '%s' "$SM" | grep -qi 'STANDBY mode'; then
+        # A standby answer is a successful query — the drive was reached.
+        SMOK=$((SMOK + 1))
         printf '| /dev/%s | (standby — not woken) | %s | %s | %s | %s |\n' "$d" "$NA" "$NA" "$NA" "$NA"
         continue
       fi
       [ -z "$SM" ] && { printf '| /dev/%s | %s | %s | %s | %s | %s |\n' "$d" "(no data)" "$NA" "$NA" "$NA" "$NA"; continue; }
+      SMOK=$((SMOK + 1))
 
       health=$(printf '%s\n' "$SM" | awk -F: '/overall-health|SMART Health Status/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
 
@@ -306,6 +377,9 @@ if have smartctl && [ -n "$DISKS" ]; then
       printf '| /dev/%s | %s | %s | %s | %s | %s |\n' \
         "$d" "${health:-$NA}" "${poh:-$NA}" "$rp" "${wear:-$NA}" "${tmp:-$NA}"
     done
+    if [ "$SMOK" -eq 0 ]; then
+      warn "\`smartctl\` answered for none of the $SMTOTAL disk(s) as root — every health row is empty. Drives behind a RAID controller are expected here; a plain SATA/NVMe host is not."
+    fi
     echo
     if tmo 15 smartctl --scan 2>/dev/null | grep -q .; then
       printf '**`smartctl --scan` sees:**\n\n```\n'
@@ -320,7 +394,15 @@ fi
 # Hardware RAID (Dell PERC, LSI/Broadcom MegaRAID, HP Smart Array).
 # Vendor CLIs are invoked with `show` verbs only. Never add/delete/set/start.
 RAIDCTL=""
-have lspci && RAIDCTL=$("${TMO[@]}" lspci 2>/dev/null | grep -iE 'MegaRAID|PERC|LSI.*RAID|Smart Array|cciss|RAID bus controller' | head -4)
+LSPCI_RAW=""
+if have lspci; then
+  LSPCI_RAW=$("${TMO[@]}" lspci 2>/dev/null || true)
+  # No RAID controller in the list is normal. An empty list is not: it means
+  # the PCI bus was never enumerated, so "no controller found" below would be
+  # an assertion this host has none, which is exactly the wrong answer.
+  [ -z "$LSPCI_RAW" ] && warn '`lspci` is installed but enumerated no PCI devices — the RAID controller and PCI sections cannot be trusted as "none present".'
+  RAIDCTL=$(printf '%s\n' "$LSPCI_RAW" | grep -iE 'MegaRAID|PERC|LSI.*RAID|Smart Array|cciss|RAID bus controller' | head -4)
+fi
 
 if [ -n "$RAIDCTL" ]; then
   printf '### RAID controller\n\n```\n%s\n```\n\n' "$RAIDCTL"
@@ -456,6 +538,10 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
       printf '| Slot | Device | Identity | Raw size | FS | Filesystem | Status | Temp |\n'
       printf '|---|---|---|---|---|---|---|---|\n%s\n\n' "$UDISKS"
       printf '_Slot names are Unraid roles: `parity` is parity, `disk1..N` are array data disks, `cache*` are pools, `flash` is the USB boot device._\n\n'
+    else
+      # disks.ini exists and was readable, so this is an Unraid host whose
+      # array slots did not parse — not a machine that simply has no array.
+      warn 'Unraid disks.ini is readable but no array slots parsed — the array slot table is empty.'
     fi
   fi
 
@@ -485,13 +571,23 @@ printf '### Storage — filesystems and pools\n\n'
 printf '```\n'
 if have df; then
   echo "--- df -hT ---"
-  "${TMO[@]}" df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | head -60
+  DFOUT=$("${TMO[@]}" df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | head -60)
+  printf '%s\n' "$DFOUT"
+  [ -z "$DFOUT" ] && warn '`df` is installed but reported no real filesystems.'
 fi
 if have findmnt; then
   echo
   echo "--- findmnt (mount options) ---"
-  "${TMO[@]}" findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | head -60
+  FMOUT=$("${TMO[@]}" findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | head -60)
+  printf '%s\n' "$FMOUT"
+  [ -z "$FMOUT" ] && warn '`findmnt` is installed but listed no mounted filesystems.'
 fi
+# No warning for zpool or btrfs, deliberately. Unlike df/findmnt/lsblk, which
+# describe facts every host has, these describe optional subsystems: zfsutils
+# and btrfs-progs are routinely installed as dependencies on hosts that use
+# neither, where an empty listing is the correct answer rather than a failure.
+# Warning here would fire on ordinary ext4 machines and train readers to skip
+# the section. Do not add one.
 if have zpool; then
   echo
   echo "--- zpool list ---"
@@ -507,7 +603,11 @@ fi
 if have pvesm; then
   echo
   echo "--- pvesm status ---"
-  "${TMO[@]}" pvesm status 2>/dev/null
+  PVSOUT=$("${TMO[@]}" pvesm status 2>/dev/null)
+  printf '%s\n' "$PVSOUT"
+  if is_root && [ -z "$PVSOUT" ]; then
+    warn '`pvesm` is installed but reported no storage as root — the Proxmox storage list is missing.'
+  fi
 fi
 printf '```\n\n'
 
@@ -516,8 +616,9 @@ printf '### Network interfaces\n\n'
 if ! have ip; then
   printf '`ip` (iproute2) not available — record interfaces manually.\n\n'
 else
-  printf '| Interface | State | MAC | Addresses | Link speed |\n|---|---|---|---|---|\n'
-  "${TMO[@]}" ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | while read -r ifc; do
+  # Captured for the same reason as the storage table: the row loop is a
+  # pipeline body and cannot warn() from inside it.
+  IFROWS=$("${TMO[@]}" ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | while read -r ifc; do
     [ "$ifc" = "lo" ] && continue
     state=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "$NA")
     mac=$(cat "/sys/class/net/$ifc/address" 2>/dev/null || echo "$NA")
@@ -526,7 +627,14 @@ else
     spd=$(cat "/sys/class/net/$ifc/speed" 2>/dev/null)
     if [ -n "$spd" ] && [ "$spd" -gt 0 ] 2>/dev/null; then spd="${spd} Mb/s"; else spd="$NA"; fi
     printf '| %s | %s | %s | %s | %s |\n' "$ifc" "$state" "$mac" "$addrs" "$spd"
-  done
+  done)
+  if [ -n "$IFROWS" ]; then
+    printf '| Interface | State | MAC | Addresses | Link speed |\n|---|---|---|---|---|\n'
+    printf '%s\n' "$IFROWS"
+  else
+    printf '_No interfaces other than loopback reported._\n'
+    warn '`ip` is installed but listed no non-loopback interfaces — the network table is empty.'
+  fi
   echo
   DEFRT=$("${TMO[@]}" ip route show default 2>/dev/null | head -1)
   [ -n "$DEFRT" ] && printf 'Default route: `%s`\n\n' "$DEFRT"
@@ -540,11 +648,17 @@ fi
 # than the human-readable name when diagnosing a driver problem.
 if have lspci; then
   printf '### Notable PCI devices\n\n```\n'
-  "${TMO[@]}" lspci -nnk 2>/dev/null | awk '
+  PCIOUT=$("${TMO[@]}" lspci -nnk 2>/dev/null | awk '
     /^[0-9a-f][0-9a-f]:/ { keep = (tolower($0) ~ /vga|3d controller|display|ethernet|network|raid|sata|non-volatile|serial attached/) }
     keep
-  ' | head -60
+  ' | head -60)
+  printf '%s\n' "$PCIOUT"
   printf '```\n\n'
+  # Only warn when plain lspci worked — otherwise the probe above already did,
+  # and one broken tool should not produce two warnings.
+  if [ -n "$LSPCI_RAW" ] && [ -z "$PCIOUT" ]; then
+    warn '`lspci -nnk` returned nothing although plain `lspci` worked — the PCI device list with bound drivers is missing.'
+  fi
 fi
 
 # ------------------------------------------------------------ BMC / IPMI ---
@@ -557,7 +671,13 @@ if have ipmitool && is_root && { [ -e /dev/ipmi0 ] || [ -e /dev/ipmi/0 ] || [ -e
 
   MCINFO=$(tmo 15 ipmitool mc info 2>/dev/null \
     | grep -E 'Manufacturer Name|Product Name|Firmware Revision|IPMI Version' | head -6)
-  [ -n "$MCINFO" ] && printf '```\n%s\n```\n\n' "$MCINFO"
+  # The gate above already confirmed root and a live IPMI device node, so a
+  # BMC that will not identify itself is a real failure, not absent hardware.
+  if [ -n "$MCINFO" ]; then
+    printf '```\n%s\n```\n\n' "$MCINFO"
+  else
+    warn '`ipmitool mc info` returned nothing although an IPMI device node is present — BMC details are missing.'
+  fi
 
   # Community strings and auth settings are filtered out deliberately.
   LANINFO=$(tmo 15 ipmitool lan print 1 2>/dev/null \
@@ -589,7 +709,11 @@ if have pveversion || have pct || have qm; then
 
   if have pveversion; then
     PVEV=$(tmo 15 pveversion -v 2>/dev/null | head -30)
-    [ -n "$PVEV" ] && printf '#### Package versions\n\n```\n%s\n```\n\n' "$PVEV"
+    if [ -n "$PVEV" ]; then
+      printf '#### Package versions\n\n```\n%s\n```\n\n' "$PVEV"
+    else
+      warn '`pveversion -v` returned nothing on a host that has it installed — Proxmox package versions are missing.'
+    fi
   fi
 
   # Reads the config text held in $CFG by the loops below.
@@ -597,7 +721,14 @@ if have pveversion || have pct || have qm; then
 
   # ---- LXC containers ----
   if have pct; then
-    CTIDS=$(tmo 20 pct list 2>/dev/null | awk 'NR>1{print $1}')
+    # A host with zero containers still prints a header line, so an entirely
+    # empty result means the command failed rather than "no containers".
+    # Warned only as root, since pct needs root to talk to the cluster fs.
+    PCTRAW=$(tmo 20 pct list 2>/dev/null)
+    if is_root && [ -z "$PCTRAW" ]; then
+      warn '`pct list` returned nothing as root — LXC containers could not be enumerated and are absent from the report.'
+    fi
+    CTIDS=$(printf '%s\n' "$PCTRAW" | awk 'NR>1{print $1}')
     CTROWS=""
     for id in $CTIDS; do
       CFG=$(tmo 10 pct config "$id" 2>/dev/null || true)
@@ -621,7 +752,11 @@ if have pveversion || have pct || have qm; then
 
   # ---- QEMU VMs ----
   if have qm; then
-    VMIDS=$(tmo 20 qm list 2>/dev/null | awk 'NR>1{print $1}')
+    QMRAW=$(tmo 20 qm list 2>/dev/null)
+    if is_root && [ -z "$QMRAW" ]; then
+      warn '`qm list` returned nothing as root — QEMU VMs could not be enumerated and are absent from the report.'
+    fi
+    VMIDS=$(printf '%s\n' "$QMRAW" | awk 'NR>1{print $1}')
     VMROWS=""
     for id in $VMIDS; do
       CFG=$(tmo 10 qm config "$id" 2>/dev/null || true)
@@ -640,6 +775,9 @@ if have pveversion || have pct || have qm; then
     fi
   fi
 
+  # No warning here on purpose: `pvecm status` fails on a standalone node that
+  # was never joined to a cluster, which is a normal Proxmox install, not a
+  # collection failure. Do not "fix" this by adding one.
   if have pvecm; then
     CLU=$(tmo 15 pvecm status 2>/dev/null | head -20)
     [ -n "$CLU" ] && printf '#### Cluster\n\n```\n%s\n```\n\n' "$CLU"
@@ -647,9 +785,15 @@ if have pveversion || have pct || have qm; then
 fi
 
 # ---------------------------------------------------------------- DOCKER ----
+# `docker info` failing is the gate, not a warning: an installed docker with a
+# stopped daemon, or a user outside the docker group, is a legitimate state and
+# the section is skipped. Past the gate the daemon answered, so a collector
+# that then returns nothing has failed.
 if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
   printf '### Docker\n\n```\n'
-  "${TMO[@]}" docker version --format 'Docker {{.Server.Version}}' 2>/dev/null
+  DVER=$("${TMO[@]}" docker version --format 'Docker {{.Server.Version}}' 2>/dev/null)
+  printf '%s\n' "$DVER"
+  [ -z "$DVER" ] && warn '`docker version` returned nothing although the daemon answered `docker info`.'
   echo
   "${TMO[@]}" docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | head -100
   printf '```\n\n'
@@ -669,6 +813,7 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------- SERVICES --
+# An empty `--failed` list is the healthy case, never a warning.
 if have systemctl; then
   FAILED=$("${TMO[@]}" systemctl --failed --no-legend --no-pager 2>/dev/null | head -20)
   printf '### Failed systemd units\n\n'
@@ -679,4 +824,19 @@ if have systemctl; then
   fi
 fi
 
+# ------------------------------------------------------------- WARNINGS -----
+# Printed before the footer so the footer stays the last line of the report.
+if [ "$WARNCOUNT" -gt 0 ]; then
+  printf '## Collection warnings\n\n'
+  printf 'A collector that was present and permitted returned nothing. Treat the\n'
+  printf 'sections named below as **unknown**, not as "this host has none":\n\n'
+  printf '%s\n' "$WARNINGS"
+  printf '_%d collector(s) affected. The script exits 1 when this section is present._\n\n' "$WARNCOUNT"
+fi
+
 printf -- '---\n*End of report for %s.*\n' "$HOST"
+
+# Exit non-zero so a caller that only checks $? still learns the report is
+# incomplete. The report itself is always written in full first.
+[ "$WARNCOUNT" -eq 0 ] || exit 1
+exit 0
