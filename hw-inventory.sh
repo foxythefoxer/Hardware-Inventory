@@ -18,6 +18,7 @@
 # Note: run with `bash`, not `./`, and your fish shell stays out of the way.
 
 set -u
+export LC_ALL=C
 
 have() { command -v "$1" >/dev/null 2>&1; }
 NA="—"
