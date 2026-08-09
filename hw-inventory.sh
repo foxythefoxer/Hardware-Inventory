@@ -89,7 +89,7 @@ BIOS=$(dmi bios-version)
 # Disks, used by both the inventory table and the SMART table.
 DISKS=""
 have lsblk && DISKS=$($TMO lsblk -dn -o NAME,TYPE 2>/dev/null \
-  | awk '$2=="disk"{print $1}' | grep -Ev '^(loop|ram|zram|sr)' || true)
+  | awk '$2=="disk"{print $1}' | grep -Ev '^(loop|ram|zram|sr|zd[0-9])' || true)
 
 # ============================================================ frontmatter ===
 printf -- '---\n'
@@ -230,7 +230,7 @@ if have lsblk; then
   # empty MODEL/SERIAL fields and silently shifts every later column.
   fld() { printf '%s' "$2" | sed -n "s/.*[[:space:]]\{0,\}$1=\"\([^\"]*\)\".*/\1/p"; }
   $TMO lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null \
-    | grep -Ev 'NAME="(loop|ram|zram|sr)[0-9]*"' \
+    | grep -Ev 'NAME="(loop|ram|zram|sr)[0-9]*"|NAME="zd[0-9][0-9]*"' \
     | grep -F 'TYPE="disk"' \
     | while IFS= read -r line; do
         name=$(fld NAME "$line");   [ -z "$name" ] && continue
