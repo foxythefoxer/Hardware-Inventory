@@ -244,13 +244,28 @@ fi
 echo
 if [ -r /proc/cmdline ]; then
   printf '**Kernel command line**\n\n```\n'
-  # Parameter names are kept; values that look sensitive are not. Covers
-  # rd.luks.key (dracut's LUKS keyfile spec) via the generic "key" match.
+  # Two passes, because a credential can hide in either half of a parameter.
+  #
+  # By NAME: rd.luks.key, rd.iscsi.password and friends — the name matches, so
+  # the whole value goes. Covers dracut's LUKS keyfile spec via "key".
+  #
+  # By VALUE: dracut's iSCSI root packs CHAP secrets into the value itself,
+  # where no name match can see them:
+  #   netroot=iscsi:user:pass:rev_user:rev_pass@host:port:...:targetname
+  # Everything between "iscsi:" and "@" is credential material and is replaced
+  # wholesale — including the usernames, which are half of a CHAP pair rather
+  # than merely identifying. Host, port, LUN and target name stay visible,
+  # which is the part with inventory value. A target with no credentials has
+  # no "@" and is left alone.
+  #
+  # This is still a filter, not a proof: it catches the forms known to appear
+  # here, not every way a secret could be written on a kernel command line.
   awk '{
     out=""
     for (i=1;i<=NF;i++) {
       tok=$i; name=tok; sub(/=.*/,"",name)
       if (tok ~ /=/ && tolower(name) ~ /(password|secret|token|key)/) tok=name"=REDACTED"
+      else if (tok ~ /iscsi:[^@]+@/) sub(/iscsi:[^@]+@/, "iscsi:REDACTED@", tok)
       out = (out=="") ? tok : out" "tok
     }
     print out

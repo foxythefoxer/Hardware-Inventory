@@ -1,0 +1,1 @@
+BOOT_IMAGE=/vmlinuz-6.17.9 root=UUID=1111-2222 ro netroot=iscsi:chapuser1:ChapPass111:revuser1:RevPass222@198.51.100.5:3260:1:lun1:iqn.2001-04.com.example:target0 rd.iscsi.password=SuperSecret333 rd.luks.key=/keyfile:UUID=3333-4444 rd.iscsi.initiator=iqn.1994-05.com.redhat:client0 rd.iscsi.firmware=1 quiet splash

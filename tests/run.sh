@@ -198,6 +198,30 @@ grep -q '^## Collection warnings' "$TMP/m.md" \
   && bad "absent tools produced warnings" || ok "no warnings for absent tools"
 grep -q 'End of report' "$TMP/m.md" && ok "still writes the full report" || bad "no footer"
 
+# -------------------------------------------------------------- T9 cmdline ---
+# C-009. Both halves matter: a leaked secret is the obvious failure, but
+# over-redacting is a real one too — a kernel command line with the target and
+# initiator scrubbed out stops being useful as inventory.
+head_ "T9  Kernel command line redaction"
+
+sed -e "s#/proc/cmdline#$FIX/cmdline/cmdline.txt#g" "$SCRIPT" > "$TMP/cmdline.sh"
+bash "$TMP/cmdline.sh" > "$TMP/k.md" 2>/dev/null
+
+# CHAP secrets *and* CHAP usernames: a username is half of a credential pair,
+# not merely identifying, so it is redacted with the rest.
+for s in ChapPass111 RevPass222 SuperSecret333 chapuser1 revuser1; do
+  grep -q "$s" "$TMP/k.md" && bad "SECRET LEAK: $s appears in output" || ok "redacted: $s"
+done
+
+grep -q 'iscsi:REDACTED@198.51.100.5:3260' "$TMP/k.md" \
+  && ok "iSCSI host and port still visible" || bad "host/port lost, or creds not redacted"
+grep -q 'iqn.2001-04.com.example:target0' "$TMP/k.md" \
+  && ok "iSCSI target name preserved" || bad "target name lost"
+grep -q 'rd.iscsi.password=REDACTED' "$TMP/k.md" \
+  && ok "name-based redaction still applies" || bad "rd.iscsi.password not redacted"
+grep -q 'rd.iscsi.initiator=iqn.1994-05' "$TMP/k.md" \
+  && ok "non-secret iscsi params untouched" || bad "over-redacted rd.iscsi.initiator"
+
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
