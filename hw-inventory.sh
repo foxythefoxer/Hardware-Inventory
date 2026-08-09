@@ -553,10 +553,12 @@ elif have ipmitool && is_root; then
   printf '_`ipmitool` present but no IPMI device node. The `ipmi_si` and `ipmi_devintf` modules are not loaded; this script will not load them. Load them yourself if you want BMC data here._\n\n'
 fi
 
-if have racadm; then
+if have racadm && is_root; then
   RAC=$(timeout 20 racadm getsysinfo 2>/dev/null \
     | grep -viE 'password|community' | head -35)
-  [ -n "$RAC" ] && printf '**racadm getsysinfo**\n\n```\n%s\n```\n\n' "$RAC"
+  if [ -n "$RAC" ]; then
+    printf '### racadm getsysinfo\n\n```\n%s\n```\n\n' "$RAC"
+  fi
 fi
 
 # ---------------------------------------------------------------- PROXMOX ---
