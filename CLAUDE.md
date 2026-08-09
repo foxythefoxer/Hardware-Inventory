@@ -28,7 +28,7 @@ When adding a vendor CLI, allow only `show`-class verbs and say so in a comment.
 
 ## The exit-code contract
 
-Since F-025/F-026 the script exits `0` when collection is complete and `1` when it is
+Since C-025/C-026 the script exits `0` when collection is complete and `1` when it is
 not, having written the report in full either way and ended it with a
 `## Collection warnings` block naming what failed. Callers may rely on this.
 
@@ -72,8 +72,11 @@ not a fresh opinion.
 
 ### `set -o pipefail` — rejected
 
-24 pipelines terminate in `head -N`. `head` exits after N lines, upstream receives
-SIGPIPE, and under `pipefail` that surfaces as exit 141. Measured:
+23 pipelines end in `head -N`; 22 of them terminate there (one, the dmidecode wrapper,
+pipes `head`'s output on into `sed`, but still surfaces the same exit code under
+`pipefail` — the rightmost non-zero status in the pipeline, not merely the last command's,
+is what `pipefail` reports). `head` exits after N lines, upstream receives SIGPIPE, and
+under `pipefail` that surfaces as exit 141. Measured:
 
 ```
 with pipefail:    exit=141
@@ -112,12 +115,8 @@ until there's an actual need for `--skip` / section selection.
 
 ### Remaining
 
-- Named constants for the `head -N` limits, plus a marker when a limit is hit (F-014).
-  This bug class has now recurred three times; fix the pattern, not the instance. Note
-  the count is **23**, not the 22 every review states — verified against the file, and it
-  has been 23 since the first commit.
 - The megaraid probe targets the first non-NVMe disk, which on Unraid is often the USB
-  boot device (F-016).
+  boot device (C-016).
 - Escape `|` in Markdown table cells (C-004, LOW — most pipe-bearing output already sits
   inside code fences).
 - `/etc/os-release` is sourced, which executes it as root (C-005).
@@ -126,19 +125,34 @@ until there's an actual need for `--skip` / section selection.
 
 Each was verified against the file and covered by `tests/run.sh` where testable.
 
-- **Warning accumulator + meaningful exit code** (F-025, F-026). See the contract below.
-- **All hardcoded `timeout N` sites routed through the `have timeout` gate** (F-003).
+- **Warning accumulator + meaningful exit code** (C-025, C-026). See the contract below.
+- **All hardcoded `timeout N` sites routed through the `have timeout` gate** (C-003).
   `TMO` is now an array (`"${TMO[@]}"`); a `tmo N cmd...` function covers the sites
   needing a duration other than the 10s default. Both fall back to running the command
   unwrapped when `timeout` is absent, which was the whole point of the original guard.
-- **Physical-devices table filtered on `TYPE=="disk"`** (F-012), *plus* a `zd[0-9]` name
+- **Named constants for every `head -N` limit, plus a marker when one is actually hit**
+  (C-014, 03f4cf7). 17 named constants (grouped by what they cap: SMART, RAID
+  CLI, filesystem tables, IPMI, Proxmox, Docker, systemd — some intentionally share a
+  constant, e.g. df+findmnt; none share one across categories even when the number
+  coincides, so MegaCLI's PD cap and df's table cap stay independently tunable) replace
+  the 19 sites where a `head -N` truncation was safe to mark inline via `cap()`. `cap()`
+  itself never calls `warn()` and cannot: a truncated list is real data, not a collector
+  failure, and cap runs as the tail of a pipeline (a subshell) where a `warn()` mutation
+  would be lost anyway (G-002). One site — `CNAMES` in the Docker section — is
+  deliberately NOT run through `cap()`: that list is word-split into `docker inspect`
+  arguments, so an inline marker would be passed as a bogus container name. It reads the
+  full list, caps it with plain `head`, and defers its own marker to after the container-
+  networks table instead. Covered by T10 (general `cap()` behaviour) and T11 (the CNAMES
+  hazard specifically); both were verified against negative controls that reproduce the
+  bug being guarded against.
+- **Physical-devices table filtered on `TYPE=="disk"`** (C-012), *plus* a `zd[0-9]` name
   exclusion — the reviewer's `TYPE` filter alone does not catch zvols, which report
   `TYPE=disk`. Still unverified against real zvols; confirm on a `local-zfs` host.
-- `export LC_ALL=C` after `set -u` (F-001).
-- `racadm` gated on `is_root` with its own `###` heading (F-020).
-- One `docker inspect` over all containers instead of N+1 (F-023).
-- DIMM rows emitted at record boundary (F-011).
-- `/proc/cmdline` redacted two ways (F-009): by parameter **name** matching
+- `export LC_ALL=C` after `set -u` (C-001).
+- `racadm` gated on `is_root` with its own `###` heading (C-020).
+- One `docker inspect` over all containers instead of N+1 (C-023).
+- DIMM rows emitted at record boundary (C-011).
+- `/proc/cmdline` redacted two ways (C-009): by parameter **name** matching
   `password|secret|token|key`, and by **value** for credentials embedded inside dracut's
   `netroot=iscsi:user:pass:rev_user:rev_pass@host:...` form, where the parameter name
   gives nothing away. Everything between `iscsi:` and `@` is replaced, CHAP usernames
@@ -169,11 +183,24 @@ changed. The suite now covers what this section used to ask for by hand:
 5. **T9 cmdline redaction.** Also both halves: secrets and CHAP usernames gone, and the
    target name, initiator and `rd.iscsi.firmware` still present. Over-redaction is a real
    failure too — a command line scrubbed of its target is no longer useful as inventory.
-6. `bash -n` (T1) and ShellCheck (T7, skipped when not installed). Baseline was **zero
+6. **T10/T11 output caps.** T10 is the general case: a stub over a limit gets the
+   `--- truncated ---` marker and nothing past it; a stub under the limit is
+   byte-for-byte what a bare `head -N` would have produced, marker included (i.e. not
+   included) — this second half is what catches a marker leaking onto an untruncated,
+   otherwise-empty-should-stay-empty section. T11 is the CNAMES edge case specifically:
+   a marker must never reach `docker inspect`'s argument list, and must land after the
+   container-networks table, not inside it. Both were run against deliberately
+   reintroduced versions of the bugs they guard against, to confirm they actually fail
+   without the fix — a stderr-based first draft of T11 did not, since the script
+   correctly runs `docker inspect` under `2>/dev/null` and the test was checking a
+   channel the script itself discards.
+7. `bash -n` (T1) and ShellCheck (T7, skipped when not installed). Baseline was **zero
    errors, zero warnings** on the default ruleset (24 findings, all severity `note`; the
    `SC2016` hits are false positives from single-quoted awk programs). Do not regress
-   this — and note it has not been re-verified since the F-025/F-026 work, because
-   ShellCheck was not installed in that environment.
+   this — and note it **still** has not been re-verified since the C-025/C-026 work:
+   ShellCheck requires `sudo pacman -S shellcheck` on this host and sudo needs an
+   interactive password that isn't available to an agent session. Install it by hand and
+   run T7 before trusting the baseline.
 
 Some paths are still only reachable as root (`dmidecode`, SMART, `pct`/`qm`, IPMI).
 Where sudo isn't available, simulating `is_root() { true; }` against a copy exercises
@@ -201,3 +228,11 @@ the branches; it found the `dmidecode` banner problem noted above. Run the suite
 - Warning text names the tool and says what is missing as a result, so a reader who
   never opens the script can act on it. "`lsblk` is installed but listed no block
   devices — the storage and SMART sections are empty as a result", not "lsblk failed".
+- A `head -N` that can genuinely truncate real output goes through `cap()` with a named
+  constant, not a bare number — see the constants block near the top. `cap()` is not
+  `warn()`: truncation is real data arriving incomplete, not a collector failing, and it
+  never touches `WARNCOUNT` or the exit code. Before piping something through `cap()`,
+  check whether its output is later word-split into another command's arguments (as
+  `CNAMES` is, into `docker inspect`'s) — an inline marker there becomes a bogus argument
+  instead of a footnote. That site reads the full list, caps it with plain `head`, and
+  defers its marker to after the block instead.
