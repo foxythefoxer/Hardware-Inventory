@@ -26,6 +26,45 @@ When adding a vendor CLI, allow only `show`-class verbs and say so in a comment.
 
 ---
 
+## The exit-code contract
+
+Since F-025/F-026 the script exits `0` when collection is complete and `1` when it is
+not, having written the report in full either way and ended it with a
+`## Collection warnings` block naming what failed. Callers may rely on this.
+
+**The judgment call, which is the whole feature:** a warning means the tool was
+**present, permitted, and still returned nothing.** Silence is for things a host
+genuinely lacks.
+
+- Tool not installed → silent. A minimal host is not a broken one.
+- Tool needs root and the run is unprivileged → silent. The header already says so.
+- Tool present, permitted, no output → `warn`.
+
+Judgments already made here, with the reasoning, so they don't get relitigated:
+
+- **`zpool` and `btrfs` never warn.** `zfsutils` and `btrfs-progs` are routinely
+  installed as dependencies on hosts that use neither filesystem, where an empty listing
+  is the correct answer. A warning there would fire on ordinary ext4 machines and train
+  readers to skip the section. `df`, `findmnt`, `lsblk`, `lscpu` and `ip` *do* warn —
+  they describe facts every working host has. Both sites carry a comment saying so.
+- **`pvecm` never warns.** `pvecm status` fails on a standalone node that was never
+  joined to a cluster, which is a normal Proxmox install.
+- **`docker info` failing is the section gate, not a warning.** Installed docker with a
+  stopped daemon, or a user outside the `docker` group, is legitimate.
+- **An empty `systemctl --failed`, zero containers and zero VMs are healthy**, not
+  warnings. Where a tool prints a header even with nothing to report (`pct list`,
+  `qm list`), test the raw output for emptiness rather than the parsed row count.
+- **Test the thing that actually indicates failure, not just emptiness.** `dmidecode -t
+  memory` prints a banner to stdout even when it cannot read `/dev/mem`, so that check
+  keys off the `Memory Device` record count. An emptiness test there never fires.
+
+`warn` **must only be called from the main shell.** Pipeline bodies and command
+substitutions are subshells and their mutations are lost (G-002) — this is no longer a
+theoretical fragility now that a global accumulator exists. The storage and network row
+loops capture their pipeline into a variable and test it outside; follow that pattern.
+
+---
+
 ## Rejected proposals — do not re-suggest
 
 These have been evaluated and declined with reasons. Reopening one requires new evidence,
@@ -71,36 +110,35 @@ until there's an actual need for `--skip` / section selection.
 
 ## Agreed work queue
 
-Ordered. Tier 1 affects whether the report can be trusted; Tier 2 is cheap hygiene.
+### Remaining
 
-### Tier 1 — trustworthiness of the artifact
+- Named constants for the `head -N` limits, plus a marker when a limit is hit (F-014).
+  This bug class has now recurred three times; fix the pattern, not the instance. Note
+  the count is **23**, not the 22 every review states — verified against the file, and it
+  has been 23 since the first commit.
+- The megaraid probe targets the first non-NVMe disk, which on Unraid is often the USB
+  boot device (F-016).
+- Escape `|` in Markdown table cells (C-004, LOW — most pipe-bearing output already sits
+  inside code fences).
+- `/etc/os-release` is sourced, which executes it as root (C-005).
 
-1. **Warning accumulator + meaningful exit code** (F-025, F-026). Sections that produce
-   nothing append to a warnings list; the script emits a `## Collection warnings` block
-   and exits non-zero. Today, a systemically broken host and a bare host produce
-   identical-looking output — and this report is consumed as ground truth, so a silently
-   empty section doesn't produce no answer, it produces a confident wrong one. Highest
-   priority for that reason. Note this changes the caller contract; nothing wraps the
-   script today, but make the change deliberately.
-2. **Route all 26 hardcoded `timeout N` sites through `$TMO`** (F-003). A fallback was
-   built at line 28 for systems lacking coreutils `timeout`, then bypassed everywhere.
-   Making `TMO` an array is the clean fix.
-3. **Filter the physical-devices table on `TYPE=="disk"`** (F-012). It currently only
-   excludes `loop|ram|zram|sr` by name, so `md*`, `dm-*` and — worst — ZFS zvols appear
-   as phantom physical drives. On a Proxmox host with `local-zfs`, every VM disk becomes
-   a `/dev/zdN` row *and* gets its own wasted `smartctl` probe. Not yet verified against
-   real zvols; confirm before and after.
+### Done — do not re-implement
 
-### Tier 2 — cheap and clearly correct
+Each was verified against the file and covered by `tests/run.sh` where testable.
 
-- `export LC_ALL=C` after `set -u` (F-001). Verified not to mangle the em-dash sentinel
-  or awk's `%.2f`.
-- Gate `racadm` on `is_root` and give it a real `###` heading (F-020).
-- Replace the N+1 `docker inspect` loop with one call over all containers (F-023).
-- Emit DIMM rows at record boundary so a module with no Part Number isn't dropped (F-011).
-- Named constants for the 22 `head -N` limits, plus a marker when a limit is hit (F-014).
-  This bug class has now recurred three times; fix the pattern, not the instance.
-- Filter `/proc/cmdline` for `rd.luks.key` and similar before emitting (F-009).
+- **Warning accumulator + meaningful exit code** (F-025, F-026). See the contract below.
+- **All hardcoded `timeout N` sites routed through the `have timeout` gate** (F-003).
+  `TMO` is now an array (`"${TMO[@]}"`); a `tmo N cmd...` function covers the sites
+  needing a duration other than the 10s default. Both fall back to running the command
+  unwrapped when `timeout` is absent, which was the whole point of the original guard.
+- **Physical-devices table filtered on `TYPE=="disk"`** (F-012), *plus* a `zd[0-9]` name
+  exclusion — the reviewer's `TYPE` filter alone does not catch zvols, which report
+  `TYPE=disk`. Still unverified against real zvols; confirm on a `local-zfs` host.
+- `export LC_ALL=C` after `set -u` (F-001).
+- `racadm` gated on `is_root` with its own `###` heading (F-020).
+- One `docker inspect` over all containers instead of N+1 (F-023).
+- DIMM rows emitted at record boundary (F-011).
+- `/proc/cmdline` values redacted for names matching `password|secret|token|key` (F-009).
 
 ---
 
@@ -110,18 +148,28 @@ Ordered. Tier 1 affects whether the report can be trusted; Tier 2 is cheap hygie
 project so far has been a hang, not an error — three static code reviews missed the one
 real defect because none of them ran the script.
 
-Before any PR:
+Before any PR: **`bash tests/run.sh`, all passing**, plus a new case for what you
+changed. The suite now covers what this section used to ask for by hand:
 
-1. **Hostile test.** Put stubs on `PATH` that exit non-zero, and at least one that
-   `sleep`s. The script must complete, reach its footer, and exit promptly.
-2. **Clean test.** On an ordinary machine with no RAID, BMC or hypervisor, confirm zero
-   stderr and no empty table headers.
-3. **Mock fixtures** for hardware you don't have. Unraid `disks.ini`/`var.ini`, `pct`/`qm`
-   config output, and a `smartctl` that answers on sparse `megaraid,N` IDs have all been
-   used successfully.
-4. `bash -n` and ShellCheck. Current baseline: **zero errors, zero warnings** on the
-   default ruleset (24 findings, all severity `note`; the `SC2016` hits are false
-   positives from single-quoted awk programs). Do not regress this.
+1. **T3 hostile.** Stubs on `PATH` that exit non-zero, one that `sleep`s. The script
+   must complete, reach its footer, and exit `1` — `124` means it hung, which is the
+   defect class this test exists for. Do not delete it to make the suite faster.
+2. **T2 clean.** Zero stderr, no empty table headers, valid YAML frontmatter, exit `0`.
+3. **T4/T5/T6 mock fixtures** for hardware you don't have: Unraid `disks.ini`/`var.ini`,
+   `pct`/`qm` config output, and a `smartctl` answering on sparse `megaraid,N` IDs.
+4. **T8 warning contract.** Both halves: a present-and-failing tool exits `1` and is
+   named; a `PATH` where the tools are merely absent still exits `0` and warns about
+   nothing. The second half is the one that catches over-eager warnings.
+5. `bash -n` (T1) and ShellCheck (T7, skipped when not installed). Baseline was **zero
+   errors, zero warnings** on the default ruleset (24 findings, all severity `note`; the
+   `SC2016` hits are false positives from single-quoted awk programs). Do not regress
+   this — and note it has not been re-verified since the F-025/F-026 work, because
+   ShellCheck was not installed in that environment.
+
+Some paths are still only reachable as root (`dmidecode`, SMART, `pct`/`qm`, IPMI).
+Where sudo isn't available, simulating `is_root() { true; }` against a copy exercises
+the branches; it found the `dmidecode` banner problem noted above. Run the suite with
+`sudo bash tests/run.sh` when you can — T6's drive probe skips otherwise.
 
 ---
 
@@ -136,4 +184,8 @@ Before any PR:
 - Serials, MACs and IPs **are** emitted on purpose; that's the point of an inventory.
   Secrets are not. The line is "identifying" vs "authenticating."
 - Section output is captured to a variable and printed only if non-empty, so absent
-  hardware never leaves a bare table header.
+  hardware never leaves a bare table header. Row loops that are pipeline bodies must be
+  captured too — both to keep that property and because `warn` cannot run inside one.
+- Warning text names the tool and says what is missing as a result, so a reader who
+  never opens the script can act on it. "`lsblk` is installed but listed no block
+  devices — the storage and SMART sections are empty as a result", not "lsblk failed".

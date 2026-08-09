@@ -57,14 +57,18 @@ Two further behaviours worth knowing:
 | macOS / BSD | Not supported | Linux-specific by design (`/sys`, `lsblk`, `ip`) |
 
 Sections that don't apply to a host are skipped silently. A machine with no RAID
-controller, no BMC and no hypervisor simply produces a shorter report.
+controller, no BMC and no hypervisor simply produces a shorter report. A section that is
+empty because a tool was present and *failed* is a different thing, and is reported —
+see [Exit codes](#exit-codes).
 
 ---
 
 ## Requirements
 
-**Required:** `bash` (3.0+), and the coreutils/util-linux basics — `awk`, `sed`, `grep`,
-`timeout`.
+**Required:** `bash` (3.0+), and the coreutils/util-linux basics — `awk`, `sed`, `grep`.
+
+`timeout` is strongly recommended but no longer required: without it, commands that
+would have been wrapped simply run unwrapped, so a hung tool can stall the run.
 
 **Optional.** Each unlocks a section; each is detected before use and skipped if absent:
 
@@ -131,6 +135,32 @@ Three things that catch people out:
 - **PERC and SMART sections can take a minute.** The megaraid probe walks device IDs and
   each sleeping disk gets a short timeout. `tee` beats a bare redirect there.
 
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Collection complete. |
+| `1` | Report written in full, but one or more collectors failed. The report ends with a `## Collection warnings` block naming them. |
+
+**A non-zero exit does not mean the report is missing** — it is always written first, in
+full. It means part of it is unknown rather than absent, and the difference matters: a
+disk table that is empty because `lsblk` failed reads identically to one that is empty
+because the host has no disks, and if you feed this to an LLM or a diff, the silent
+version becomes a confident wrong answer.
+
+What counts as a failure is deliberately narrow — the tool was **present, permitted, and
+still returned nothing**:
+
+- A tool that isn't installed is silent. A minimal host is not a broken one.
+- A tool needing root when you didn't use `sudo` is silent; the header already says the
+  run was unprivileged.
+- Zero containers, zero failed systemd units, and no cluster on a standalone Proxmox
+  node are all healthy states, not warnings.
+
+```bash
+sudo bash hw-inventory.sh > host.md || echo "incomplete — see Collection warnings"
+```
+
 ---
 
 ## Output
@@ -155,7 +185,8 @@ Sections, each emitted only when it applies: Identity · Snapshot (volatile) · 
 Boot and kernel parameters · Memory and DIMMs · Storage devices · SMART health ·
 RAID controller · Unraid array, slots and shares · Filesystems and pools · Network
 interfaces · PCI devices · BMC / IPMI · Proxmox LXC and VM tables · Docker · Failed
-systemd units.
+systemd units · Collection warnings (only when something failed — see
+[Exit codes](#exit-codes)).
 
 ### Diffing two runs
 
@@ -188,9 +219,10 @@ physical disk to pull, MACs feed DHCP reservations.
 reporting a bug here, redact serials and addresses first, or send only the section that
 demonstrates the problem.
 
-One known gap: the kernel command line is emitted verbatim, and on some systems it can
-carry secrets (`rd.luks.key`, iSCSI credentials). Check that section before sharing.
-See F-009 below.
+The kernel command line used to be emitted verbatim, which on some systems leaks secrets
+(`rd.luks.key`, iSCSI credentials). Values are now redacted for any parameter whose name
+contains `password`, `secret`, `token` or `key`; the parameter names are kept. That is a
+name-based filter, not a guarantee — glance at the section before sharing a report.
 
 ---
 
@@ -201,20 +233,31 @@ machine; all affect the completeness or fidelity of the report.
 
 | ID | Impact |
 |---|---|
-| F-025 / F-026 | Errors are suppressed and the script always exits `0`. A host where collection systematically fails produces a report that **looks complete and is empty**. No debug switch yet. |
-| F-003 | 26 call sites hardcode `timeout N` instead of using the `$TMO` fallback. On a system without coreutils `timeout`, several sections blank silently. |
-| F-012 | The "physical devices" table doesn't filter on `TYPE=="disk"`, so `md*`, `dm-*` and ZFS zvols can appear there. On a Proxmox host with `local-zfs`, every VM disk shows up as a phantom drive. |
-| F-014 | 22 fixed `head -N` truncation points with no marker when a limit is hit. A large disk shelf can be cut off mid-table. |
-| F-001 | No `LC_ALL=C`. Under a non-English locale, translated `lscpu`/`free` labels leave CPU and RAM fields empty. |
-| F-009 | `/proc/cmdline` emitted verbatim; may contain secrets. |
-| F-020 | The `racadm` block isn't root-gated and has no heading, so its output can land under the wrong section. |
-| F-011 | A DIMM with no Part Number line is dropped from the table while still counted in the slot total. |
+| F-014 | 23 fixed `head -N` truncation points with no marker when a limit is hit. A large disk shelf can be cut off mid-table. (The review says 22; the actual count has been 23 since the first commit.) |
 | F-016 | The megaraid probe targets the first non-NVMe disk, which on some hosts is a USB boot device. |
+
+**Fixed since that review**, listed because the IDs still appear in
+[docs/reviews/](docs/reviews/):
+
+| ID | Was | Now |
+|---|---|---|
+| F-025 / F-026 | Errors suppressed everywhere and always exits `0`; a systematically broken host produced a report that looked complete and was empty. | Collectors that were present and permitted but returned nothing are named under `## Collection warnings`, and the script exits `1`. See [Exit codes](#exit-codes). |
+| F-003 | 26 sites hardcoded `timeout N`, bypassing the `$TMO` fallback; without coreutils `timeout` several sections blanked silently. | Every site routes through the same `have timeout` gate, so a host without `timeout` runs the commands unwrapped instead of failing them. |
+| F-012 | The "physical devices" table filtered by name only, so `md*`, `dm-*` and ZFS zvols appeared as phantom drives — one per VM disk on a Proxmox host with `local-zfs`. | Filtered on `TYPE=="disk"` plus a `zd[0-9]` name exclusion, since zvols report `TYPE=disk` too. |
+| F-001 | No `LC_ALL=C`; a non-English locale left CPU and RAM fields empty. | `export LC_ALL=C` at the top. |
+| F-009 | `/proc/cmdline` emitted verbatim; could carry secrets. | Values are redacted for any parameter whose name contains `password`, `secret`, `token` or `key`, which covers `rd.luks.key`. Names are kept. |
+| F-020 | The `racadm` block was not root-gated and had no heading, so its output landed under the previous section. | Gated on root, with its own `###` heading. |
+| F-011 | A DIMM with no `Part Number` line was dropped from the table but still counted in the slot total. | Rows are emitted at the record boundary, so every populated slot appears. |
 
 **Deliberate non-goals**, so they aren't re-reported: no `set -e` (a best-effort
 collector must survive absent tools), no `set -o pipefail` (24 pipelines end in `head`,
 which raises SIGPIPE and would poison every exit status), no POSIX `sh` support (the
 shebang declares bash).
+
+Also deliberate: **`zpool` and `btrfs` returning nothing is never a warning.** Those
+packages are routinely installed on hosts that use neither filesystem, where an empty
+listing is the correct answer. `df`, `findmnt`, `lsblk`, `lscpu` and `ip` do warn, being
+facts every working host has.
 
 ---
 
@@ -224,6 +267,8 @@ shebang declares bash).
 hw-inventory.sh      the script
 README.md            this file
 CLAUDE.md            maintainer decisions, read by Claude Code at session start
+tests/run.sh         the test suite — bash tests/run.sh
+tests/fixtures/      failing/hanging tool stubs, Unraid and Proxmox mocks
 docs/reviews/        independent code reviews and the prompt used to generate them
 docs/prompts/        prompts for ingesting output into an Obsidian vault
 ```
@@ -237,13 +282,26 @@ Two rules, both non-negotiable:
 1. **No change may introduce a write.** If a feature seems to require one, it doesn't
    get built — find the read-only path or leave the data uncollected. `mdcmd` vs the
    emhttp `.ini` files is the worked example.
-2. **New sections must degrade silently.** Guard on `have <tool>`, wrap in a timeout,
-   redirect stderr, and produce nothing rather than an error when the hardware or tool
-   is absent.
+2. **New sections must degrade silently when the tool is absent** — guard on
+   `have <tool>`, wrap in a timeout, redirect stderr — **and warn when it is present and
+   fails.** Silence is for hardware a host doesn't have; a tool that was there, had the
+   privileges it needed, and returned nothing calls `warn`. Getting that line wrong in
+   either direction is the bug: warn too eagerly and every minimal host looks broken,
+   warn too little and an empty section reads as fact.
 
-Before opening a PR, run the failure test: make every external tool fail or hang, and
-confirm the script still completes and reaches its footer. Bugs in this project have
+Before opening a PR:
+
+```bash
+bash tests/run.sh      # all tests must pass; add one for what you changed
+```
+
+The suite makes every external tool fail or hang and confirms the script still completes,
+reaches its footer, and exits `1` rather than `124`. Bugs in this project have
 historically been hangs, not errors — errors are already handled.
+
+`warn` may only be called from the main shell. Pipeline bodies and command substitutions
+run in subshells, so a `warn` inside one is silently lost; capture the pipeline into a
+variable and test it outside, as the storage and network tables do.
 
 ---
 
