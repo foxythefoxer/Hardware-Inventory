@@ -55,7 +55,7 @@ fi
 # `set -o pipefail` to explain why it's avoided (see cap() in the script)
 # is documentation, not the directive itself.
 if strip | grep -qE '\bset -e|\bset -o pipefail'; then
-  bad "set -e / pipefail present (see docs/reviews/DISPOSITIONS.md)"
+  bad "set -e / pipefail present (see docs/DISPOSITIONS.md)"
 else
   ok "set -e and pipefail correctly absent"
 fi

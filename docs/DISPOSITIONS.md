@@ -1,8 +1,18 @@
 # Maintainer dispositions
 
-Response to the three reviews in this folder. Every finding is accepted, rejected, or
-deferred, with a reason. IDs are prefixed by reviewer, since numbering does not
-correspond across documents: `C-` Claude Opus 5, `G-` Grok 4.5, `O-` GPT-5.5.
+Every proposal about `hw-inventory.sh` that has been adjudicated, with the reasoning that
+produced the verdict. Two streams share this ledger, told apart by ID prefix:
+
+- **`C-` Claude Opus 5, `G-` Grok 4.5, `O-` GPT-5.5** — findings from the three code
+  reviews in [`reviews/`](reviews/). A closed set: one prompt, three models, 2026-08-06.
+  Numbering does not correspond across those documents, which is why the prefixes exist.
+- **`FR-`** — requests submitted from outside the review cycle, via a private notes vault's
+  Dev Projects Feature Request Log. Open-ended; new ones land here.
+
+`CLAUDE.md` is loaded into every session, so it carries only the one-line verdict per ID
+and points here. This file is opened when the reasoning is actually wanted. **Write the
+full adjudication here, then the index line there — never the paragraph in both places.**
+That duplication is what this split exists to stop.
 
 Claims marked **verified** were checked against the actual file rather than taken on
 trust.
@@ -95,6 +105,72 @@ the commit that did it. The rest are accepted but not yet written.
 | C-031 | One ~630-line top-level `main`; extract `section_*()` functions. | Real, but it restructures a working one-shot reporter. Not worth the churn until `--skip` is actually wanted. |
 | C-029 | No argument parsing; `--help` prints a full report. | Pairs naturally with C-031. Same reasoning. |
 | C-024 | `mapfile -t` instead of word-splitting `for` lists. | Cosmetic given the inputs. Bundle with C-031 if that happens. |
+
+---
+
+## Feature requests — `FR-`
+
+Submitted from outside the review cycle. Same three verdicts as above: accepted, accepted
+with changes, or rejected. "Accepted with changes" means the conditions listed **are** the
+acceptance, not commentary on it — an implementation that drops one has not implemented
+the request. A rejected request is recorded here at the same length as an accepted one,
+because a rejection nobody can audit gets re-proposed.
+
+### FR-001 — monitor detection via DRM EDID — accepted with changes
+
+Displays are the one category of attached hardware the script cannot see. Read
+`/sys/class/drm/card*-*/edid` — plain sysfs reads, so it works headless and over SSH,
+where `xrandr` needs a session. `ddcutil` stays banned and the reason belongs in a
+comment at the site, not just here: DDC/CI is bidirectional and needs `i2c-dev`, so it
+writes to the monitor. Four conditions came out of checking this against a real host:
+
+- **It must never `warn`.** A host with no connected display is not a broken host, and
+  an LXC has no `/sys/class/drm` at all. Same call as `zpool`/`btrfs`, for the same
+  reason — a warning here would fire on every headless server in the estate and train
+  readers to skip the section.
+- **Gate on bytes actually read, not on file size.** Every `edid` attribute reports
+  `stat -c%s` = 0, including the three connectors on this host that return a full 256
+  bytes. A `[ -s ]` test would skip every monitor that is present. This is the
+  `dmidecode` banner trap again (see the exit-code contract in `CLAUDE.md`): test the
+  thing that indicates the fact, not emptiness.
+- **Exclude `*-Writeback-*` connectors.** They are virtual encoders, not physical
+  outputs — the same class of false row as the zvols that a `TYPE=="disk"` filter alone
+  did not catch (C-012).
+- `edid-decode` is a parser and is fine under `have` + `$TMO` + `2>/dev/null`. Where it
+  is absent, `strings` over the same bytes still recovers the product name and serial,
+  which is enough for inventory. Both were **verified** against a `VX2768-2KP` on DP-1.
+  The panel serial is emitted on purpose: identifying, not authenticating.
+
+### FR-002 — UPS data-connection detection — accepted with changes
+
+Whether a host can actually talk to its UPS is currently knowable only by asking. Three
+mechanisms exist across the estate (apcupsd, UPower, nothing at all), so detection has to
+be layered rather than assume a tool:
+
+- **The primary signal is a direct sysfs read of `/sys/bus/usb/devices/*/idVendor`, not
+  `lsusb`.** Same move as parsing emhttp's `.ini` instead of calling `mdcmd`: the data
+  is already in a file, so read the file. `lsusb -v` in particular is out — it issues
+  USB control transfers to the device instead of reading descriptors the kernel has
+  already cached.
+- **That path is load-bearing, not a fallback.** **Verified** here: a CyberPower
+  `CP1500PFCLCDa` (`0764`) is attached and visible in sysfs with neither apcupsd nor
+  NUT installed. Both daemon-based checks report nothing on this host.
+- **`/sys/class/power_supply` cannot be the gate.** It is empty on that same host
+  despite the UPS being attached and claimed by `usbhid`. Useful as corroboration where
+  it is populated; useless as the test.
+- The vendor-ID list (APC `051d`, CyberPower `0764`) is a heuristic that will go stale.
+  Say so in a comment where it is defined, so whoever adds a third brand knows it is a
+  whitelist and not a protocol.
+- `apcaccess status` is a query to apcupsd's NIS port and is allowed, but detection must
+  not depend on the daemon answering; `/etc/apcupsd/apcupsd.conf` records the configured
+  intent independent of daemon state. `upower -e` / `-i` are reads and are allowed as a
+  third signal, though they yield little on a headless host with no session.
+- **It must never `warn`, and it stays silent when nothing is found.** Most hosts have
+  no UPS. Emitting "no UPS detected" would break the standing rule that a section prints
+  only if non-empty; absence of the section is the negative answer, exactly as it is for
+  every other category of hardware.
+- Load percentage and battery age are explicitly out of scope for the accepted item.
+  Presence of a data connection is the whole deliverable.
 
 ---
 

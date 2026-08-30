@@ -14,16 +14,18 @@ IDs referenced there something to point at.
   iteration. Cross-reference by line number, not by ID.
 - **Not all findings were accepted.** Several were rejected outright — including one
   recommended by two of the three reviewers that would break the script. See
-  [DISPOSITIONS.md](DISPOSITIONS.md) before acting on anything in here.
+  [`docs/DISPOSITIONS.md`](../DISPOSITIONS.md) before acting on anything in here.
 
-**If you are about to open a PR based on one of these reviews, read DISPOSITIONS.md
-first.** It records which findings were accepted, which were rejected, and why.
+**If you are about to open a PR based on one of these reviews, read
+[`docs/DISPOSITIONS.md`](../DISPOSITIONS.md) first.** It records which findings were
+accepted, which were rejected, and why. It sits one level up rather than in this folder
+because it is the ledger for every adjudicated proposal, these reviews included but not
+only them.
 
 ## Contents
 
 | File | What it is |
 |---|---|
-| `DISPOSITIONS.md` | Maintainer response — accept / reject / defer per finding |
 | `code-review-prompt-template.md` | The prompt given to all three models |
 | `code-review-summary--anthropic--claude-opus-5--*` | Summary + detailed, 35 findings |
 | `code-review-summary--xai--grok-4-5--*` | Summary + detailed, 7 findings |

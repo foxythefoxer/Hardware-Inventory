@@ -1,7 +1,17 @@
 # Maintainer notes for `hw-inventory.sh`
 
-Read this before proposing any change. It records decisions already made and the
-reasoning behind them, so they don't get relitigated each session.
+Read this before proposing any change. It states the rules this script is built on and
+the verdict on every proposal already adjudicated, so they don't get relitigated each
+session.
+
+The verdicts here are one line each. The reasoning behind them — measurements, binding
+conditions, what was checked against a real host — lives in
+[`docs/DISPOSITIONS.md`](docs/DISPOSITIONS.md) under the same IDs: `C-`/`G-`/`O-` for the
+three code reviews in `docs/reviews/`, `FR-` for a request submitted from outside the
+review cycle, via the vault's Dev Projects Feature Request Log. **A new adjudication,
+accepted or rejected, is written out there and indexed here in one line — never written
+at length in both files.** This file is loaded into every session; the ledger is opened
+when the reasoning is actually wanted, which is why the long form belongs in it.
 
 ---
 
@@ -74,47 +84,28 @@ loops capture their pipeline into a variable and test it outside; follow that pa
 
 ## Rejected proposals — do not re-suggest
 
-These have been evaluated and declined with reasons. Reopening one requires new evidence,
-not a fresh opinion.
+Evaluated and declined. Reopening one requires new evidence, not a fresh opinion. Below
+is the verdict and the single fact that settles it; the measurements and the full
+argument are in the ledger under the same ID.
 
-### `set -o pipefail` — rejected
-
-23 pipelines end in `head -N`; 22 of them terminate there (one, the dmidecode wrapper,
-pipes `head`'s output on into `sed`, but still surfaces the same exit code under
-`pipefail` — the rightmost non-zero status in the pipeline, not merely the last command's,
-is what `pipefail` reports). `head` exits after N lines, upstream receives SIGPIPE, and
-under `pipefail` that surfaces as exit 141. Measured:
-
-```
-with pipefail:    exit=141
-without pipefail: exit=0
-```
-
-Adding `pipefail` would make nearly every pipeline in the file report failure. It is also
-directly incompatible with the planned exit-code contract (see Tier 1 below).
-
-### `set -e` / `set -eE` — rejected
-
-This is a best-effort collector. Most commands are *expected* to fail: `dmidecode`
-without root, `zpool` on a non-ZFS box, `pct` off a Proxmox host. `set -e` aborts on the
-first absent tool and truncates the report. The `have` / `$TMO` / `|| true` combination
-handles those cases explicitly instead. `set -u` alone is correct and intentional.
-
-### Removing brace expansion `{0..31}` — rejected
-
-Line 1 declares `#!/usr/bin/env bash`. Numeric brace ranges have worked since bash 3.0
-(2004). Swapping to `seq` adds a coreutils dependency to remove a bash dependency from a
-bash script. POSIX `sh` support is not a goal.
-
-### Converting whitespace-split lists to arrays for safety — rejected as a priority
-
-Device names from `lsblk` and VMIDs from `pct list` are whitespace-free by construction.
-Harmless to do, but it is not a correctness fix and should not be sold as one.
-
-### Splitting the file into `section_*()` functions — deferred, not rejected
-
-Real improvement, but it restructures a working one-shot reporter. Not worth the churn
-until there's an actual need for `--skip` / section selection.
+- **`set -o pipefail`** (G-003, O). Would break the script. 23 pipelines end in
+  `head -N`, which exits early and SIGPIPEs upstream: measured exit `141` with it, `0`
+  without. Also incompatible with the exit-code contract above — you cannot have both a
+  meaningful exit code and a `pipefail` that reports failure on every successful
+  pipeline.
+- **`set -e` / `set -eE`** (O). This is a best-effort collector and most commands are
+  *expected* to fail (`dmidecode` unprivileged, `zpool` off ZFS, `pct` off Proxmox), so
+  it truncates the report at the first absent tool. `have` / `$TMO` / `|| true` handle
+  those explicitly. `set -u` alone is deliberate.
+- **Removing brace expansion `{0..31}`** (G-001). Line 1 declares `bash`; numeric ranges
+  have worked since bash 3.0 (2004). `seq` would add a coreutils dependency to remove a
+  bash dependency from a bash script.
+- **Converting whitespace-split lists to arrays** (O-001) — rejected as a *priority*, not
+  as an edit. Device names from `lsblk` and VMIDs from `pct list` are whitespace-free by
+  construction. Harmless to do; not a correctness fix, and not to be sold as one.
+- **Splitting the file into `section_*()` functions** (C-031) — deferred, not rejected.
+  Real improvement, but it restructures a working one-shot reporter; not worth the churn
+  until `--skip` / section selection is actually wanted.
 
 ---
 
@@ -122,103 +113,41 @@ until there's an actual need for `--skip` / section selection.
 
 ### Remaining
 
-- The megaraid probe targets the first non-NVMe disk, which on Unraid is often the USB
-  boot device (C-016).
-- Escape `|` in Markdown table cells (C-004, LOW — most pipe-bearing output already sits
-  inside code fences).
-- `/etc/os-release` is sourced, which executes it as root (C-005).
-- **Monitor detection via DRM EDID** (FR-001, accepted with changes). Displays are the
-  one category of attached hardware the script cannot see. Read
-  `/sys/class/drm/card*-*/edid` — plain sysfs reads, so it works headless and over SSH,
-  where `xrandr` needs a session. `ddcutil` stays banned and the reason belongs in a
-  comment at the site, not just here: DDC/CI is bidirectional and needs `i2c-dev`, so it
-  writes to the monitor. Four conditions came out of checking this against a real host:
-  - **It must never `warn`.** A host with no connected display is not a broken host, and
-    an LXC has no `/sys/class/drm` at all. Same call as `zpool`/`btrfs`, for the same
-    reason — a warning here would fire on every headless server in the estate and train
-    readers to skip the section.
-  - **Gate on bytes actually read, not on file size.** Every `edid` attribute reports
-    `stat -c%s` = 0, including the three connectors on this host that return a full 256
-    bytes. A `[ -s ]` test would skip every monitor that is present. This is the
-    `dmidecode` banner trap again (see the exit-code contract): test the thing that
-    indicates the fact, not emptiness.
-  - **Exclude `*-Writeback-*` connectors.** They are virtual encoders, not physical
-    outputs — the same class of false row as the zvols that a `TYPE=="disk"` filter alone
-    did not catch (C-012).
-  - `edid-decode` is a parser and is fine under `have` + `$TMO` + `2>/dev/null`. Where it
-    is absent, `strings` over the same bytes still recovers the product name and serial,
-    which is enough for inventory. Both were verified against a `VX2768-2KP` on DP-1. The
-    panel serial is emitted on purpose: identifying, not authenticating.
-- **UPS data-connection detection** (FR-002, accepted with changes). Whether a host can
-  actually talk to its UPS is currently knowable only by asking. Three mechanisms exist
-  across the estate (apcupsd, UPower, nothing at all), so detection has to be layered
-  rather than assume a tool:
-  - **The primary signal is a direct sysfs read of `/sys/bus/usb/devices/*/idVendor`, not
-    `lsusb`.** Same move as parsing emhttp's `.ini` instead of calling `mdcmd`: the data
-    is already in a file, so read the file. `lsusb -v` in particular is out — it issues
-    USB control transfers to the device instead of reading descriptors the kernel has
-    already cached.
-  - **That path is load-bearing, not a fallback.** Verified here: a CyberPower
-    `CP1500PFCLCDa` (`0764`) is attached and visible in sysfs with neither apcupsd nor
-    NUT installed. Both daemon-based checks report nothing on this host.
-  - **`/sys/class/power_supply` cannot be the gate.** It is empty on that same host
-    despite the UPS being attached and claimed by `usbhid`. Useful as corroboration where
-    it is populated; useless as the test.
-  - The vendor-ID list (APC `051d`, CyberPower `0764`) is a heuristic that will go stale.
-    Say so in a comment where it is defined, so whoever adds a third brand knows it is a
-    whitelist and not a protocol.
-  - `apcaccess status` is a query to apcupsd's NIS port and is allowed, but detection must
-    not depend on the daemon answering; `/etc/apcupsd/apcupsd.conf` records the configured
-    intent independent of daemon state. `upower -e` / `-i` are reads and are allowed as a
-    third signal, though they yield little on a headless host with no session.
-  - **It must never `warn`, and it stays silent when nothing is found.** Most hosts have
-    no UPS. Emitting "no UPS detected" would break the standing rule that a section prints
-    only if non-empty; absence of the section is the negative answer, exactly as it is for
-    every other category of hardware.
-  - Load percentage and battery age are explicitly out of scope for the accepted item.
-    Presence of a data connection is the whole deliverable.
+- **C-016** — the megaraid probe targets the first non-NVMe disk, which on Unraid is
+  often the USB boot device.
+- **C-004** (LOW) — escape `|` in Markdown table cells. Most pipe-bearing output already
+  sits inside code fences.
+- **C-005** — `/etc/os-release` is sourced, which executes it as root.
+- **FR-001** — monitor detection via DRM EDID. Accepted with **four binding conditions**
+  (never `warn`; gate on bytes read rather than file size; exclude `*-Writeback-*`;
+  `ddcutil` stays banned because DDC/CI writes to the monitor).
+- **FR-002** — UPS data-connection detection. Accepted with changes, the load-bearing one
+  being that the primary signal is a sysfs read of `idVendor` rather than `lsusb`, and
+  that `/sys/class/power_supply` cannot be the gate.
 
-`FR-` marks a request submitted from outside the review cycle. `C-`/`G-`/`O-` stay
-reserved for the three code reviewers, per `docs/reviews/DISPOSITIONS.md`.
+Read the ledger entry before implementing either FR: for an accepted-with-changes item
+the conditions **are** the acceptance, and both were written against a real host.
 
 ### Done — do not re-implement
 
-Each was verified against the file and covered by `tests/run.sh` where testable.
+Verified against the file and covered by `tests/run.sh` where testable.
 
-- **Warning accumulator + meaningful exit code** (C-025, C-026). See the contract below.
-- **All hardcoded `timeout N` sites routed through the `have timeout` gate** (C-003).
-  `TMO` is now an array (`"${TMO[@]}"`); a `tmo N cmd...` function covers the sites
-  needing a duration other than the 10s default. Both fall back to running the command
-  unwrapped when `timeout` is absent, which was the whole point of the original guard.
-- **Named constants for every `head -N` limit, plus a marker when one is actually hit**
-  (C-014, 03f4cf7). 17 named constants (grouped by what they cap: SMART, RAID
-  CLI, filesystem tables, IPMI, Proxmox, Docker, systemd — some intentionally share a
-  constant, e.g. df+findmnt; none share one across categories even when the number
-  coincides, so MegaCLI's PD cap and df's table cap stay independently tunable) replace
-  the 19 sites where a `head -N` truncation was safe to mark inline via `cap()`. `cap()`
-  itself never calls `warn()` and cannot: a truncated list is real data, not a collector
-  failure, and cap runs as the tail of a pipeline (a subshell) where a `warn()` mutation
-  would be lost anyway (G-002). One site — `CNAMES` in the Docker section — is
-  deliberately NOT run through `cap()`: that list is word-split into `docker inspect`
-  arguments, so an inline marker would be passed as a bogus container name. It reads the
-  full list, caps it with plain `head`, and defers its own marker to after the container-
-  networks table instead. Covered by T10 (general `cap()` behaviour) and T11 (the CNAMES
-  hazard specifically); both were verified against negative controls that reproduce the
-  bug being guarded against.
-- **Physical-devices table filtered on `TYPE=="disk"`** (C-012), *plus* a `zd[0-9]` name
-  exclusion — the reviewer's `TYPE` filter alone does not catch zvols, which report
-  `TYPE=disk`. Still unverified against real zvols; confirm on a `local-zfs` host.
-- `export LC_ALL=C` after `set -u` (C-001).
-- `racadm` gated on `is_root` with its own `###` heading (C-020).
-- One `docker inspect` over all containers instead of N+1 (C-023).
-- DIMM rows emitted at record boundary (C-011).
-- `/proc/cmdline` redacted two ways (C-009): by parameter **name** matching
-  `password|secret|token|key`, and by **value** for credentials embedded inside dracut's
-  `netroot=iscsi:user:pass:rev_user:rev_pass@host:...` form, where the parameter name
-  gives nothing away. Everything between `iscsi:` and `@` is replaced, CHAP usernames
-  included; host, port, LUN and target name are kept. Covered by T9. The name-based pass
-  alone missed the embedded form for two commits — if you add another redaction, ask
-  first whether the secret can hide in the value.
+- **C-025 / C-026** — warning accumulator and meaningful exit code. The contract above is
+  the operative statement of it.
+- **C-003** — every hardcoded `timeout N` routed through the `have timeout` gate.
+- **C-012** — physical-devices table filtered on `TYPE=="disk"` *plus* a `zd[0-9]` name
+  exclusion; the `TYPE` filter alone does not catch zvols, which report `TYPE=disk`.
+  Still unverified against real zvols — confirm on a `local-zfs` host.
+- **C-014** — named constants for every `head -N` limit, consumed through `cap()`. The
+  rules that came out of it are under Conventions below; T10/T11 cover them.
+- **C-009** — `/proc/cmdline` redacted by parameter **name** and by **value**, the latter
+  for credentials embedded in dracut's `netroot=iscsi:user:pass:...@host` form where the
+  name gives nothing away. Covered by T9. The name pass alone missed the embedded form
+  for two commits: if you add another redaction, ask first whether the secret can hide in
+  a value.
+- **C-020** `racadm` root-gated under its own `###` heading · **C-023** one
+  `docker inspect` over all containers instead of N+1 · **C-011** DIMM rows emitted at
+  the record boundary · **C-001** `export LC_ALL=C` after `set -u`.
 
 ---
 
@@ -273,7 +202,10 @@ the branches; it found the `dmidecode` banner problem noted above. Run the suite
 
 - Comments explain **why**, not what. The `lsblk -P` comment exists specifically so a
   future maintainer doesn't "simplify" it back into a column-shift bug. Keep that habit.
-- Guard every external tool with `have`, a timeout, and `2>/dev/null`.
+- Guard every external tool with `have`, a timeout, and `2>/dev/null`. The timeout is
+  `"${TMO[@]}"`, or `tmo N cmd...` where the 10s default is wrong; both run the command
+  unwrapped when `timeout` is absent, which is the entire point of the gate (C-003).
+  Never hardcode `timeout N` — that bypasses it.
 - Whitelist keys when parsing config files rather than dumping them. Unraid's `var.ini`
   contains a `csrf_token`; `ipmitool lan print` contains an SNMP community string. Both
   are filtered deliberately — extend that policy, don't work around it.

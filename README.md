@@ -291,6 +291,7 @@ README.md            this file
 CLAUDE.md            maintainer decisions, read by Claude Code at session start
 tests/run.sh         the test suite — bash tests/run.sh
 tests/fixtures/      failing/hanging tool stubs, Unraid, Proxmox and cmdline mocks
+docs/DISPOSITIONS.md accept/reject/defer ledger — every adjudicated proposal, with reasons
 docs/reviews/        independent code reviews and the prompt used to generate them
 docs/prompts/        prompts for ingesting output into an Obsidian vault
 ```

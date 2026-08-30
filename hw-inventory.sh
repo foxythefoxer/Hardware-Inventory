@@ -117,7 +117,7 @@ SYSTEMD_FAILED_LINES=20      # `systemctl --failed`.
 # Never calls warn(): truncation is not a collector failure, the tool ran and
 # answered. warn() could not be called from here safely regardless — cap runs
 # as the tail of a pipeline, which is a subshell, and a warn() mutation from
-# inside one is silently lost (G-002, docs/reviews/DISPOSITIONS.md).
+# inside one is silently lost (G-002, docs/DISPOSITIONS.md).
 #
 # Not used for the Docker CNAMES site: that list is word-split into
 # `docker inspect` arguments downstream, so a marker line appended to its
@@ -160,7 +160,7 @@ tmo() {
 #
 # warn() MUST only be called from the main shell. Pipeline bodies and command
 # substitutions run in subshells, so a warn() inside one is silently lost (see
-# G-002 in docs/reviews/DISPOSITIONS.md). Where a section's rows are produced
+# G-002 in docs/DISPOSITIONS.md). Where a section's rows are produced
 # by a `... | while read` pipeline, capture the pipeline into a variable first
 # and test that variable out here — see the storage and network tables.
 WARNINGS=""
