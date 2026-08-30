@@ -17,6 +17,13 @@ leave the data uncollected. The worked example is Unraid array state: `mdcmd sta
 the obvious call, but it works by writing a command string into `/proc/mdcmd`, so the
 script parses emhttp's `.ini` files instead. Same data, no write.
 
+This is the design's whole point, not just a safety property incidental to it: the
+script was built read-only from the start so it could eventually run unattended — a
+cron job, a scheduled sweep — without a human confirming each run against production
+hosts first. A write-capable script would need that human in the loop every time; this
+one doesn't, by construction. Any change that introduces a write doesn't just add risk,
+it breaks the reason the script can be automated at all.
+
 Banned regardless of context: `smartctl -t`, `mdcmd`, `zpool scrub/import/export/create`,
 `btrfs balance/scrub/device`, `docker run/exec/rm/pull`, `pct`/`qm` start/stop/set/destroy,
 `modprobe`, `mount`/`umount`, any package manager, any write verb on `perccli`/`storcli`/

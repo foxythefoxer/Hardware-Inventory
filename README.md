@@ -20,6 +20,10 @@ NAS or hypervisor:
 
 **Every command is a query. The script writes nothing, mutates nothing, and sends nothing.**
 
+It's also what makes the script safe to eventually run unattended — a cron job, a
+scheduled sweep, anything without a human confirming each run — since nothing it does
+ever needs confirming in the first place.
+
 Concretely, the following are deliberately absent:
 
 | Not used | Why it would have been tempting |
