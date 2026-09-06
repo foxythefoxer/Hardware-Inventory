@@ -38,12 +38,16 @@ Concretely, the following are deliberately absent:
 | `ipmitool chassis power`, `sel clear`, `mc reset` | Only `mc info`, `lan print`, `sdr`, `sel list`. |
 | `modprobe` | If the IPMI modules aren't loaded, the script says so and moves on rather than loading them. |
 | `mount` / `umount` / `mkfs` / package managers | Never. |
+| General system-info tools (`fastfetch`, `neofetch`, `inxi`) | The obvious way to cross-check the collected facts. But `fastfetch` executes `command` modules out of the host's own `config.jsonc`, so a bare call with no flags can write — and it reads the same `/proc` and sysfs files this script does, so it is a second parser, not a second source. |
 
-Two further behaviours worth knowing:
+Three further behaviours worth knowing:
 
 - **Spun-down disks stay spun down.** SMART is queried with `-n standby`, so a sleeping
   array disk is reported as `(standby — not woken)` rather than woken to answer.
 - **No temp files, no locks.** Re-running is safe. Concurrent runs are safe.
+- **The promise covers what a dependency does at startup, not just what it is asked to
+  do.** That is why the last row above is a category rather than a command, and part of
+  why the script has no dependencies beyond tools you already have.
 
 ---
 

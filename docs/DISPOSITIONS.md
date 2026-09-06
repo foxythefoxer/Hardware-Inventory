@@ -172,6 +172,119 @@ be layered rather than assume a tool:
 - Load percentage and battery age are explicitly out of scope for the accepted item.
   Presence of a data connection is the whole deliverable.
 
+### FR-003 — `fastfetch` cross-check — rejected
+
+Filed as GitHub issue #1: call `fastfetch` first where present, record its output beside
+the script's own values, and define a reconciliation policy for disagreements, with
+fastfetch proposed as the tie-breaker. The request explicitly left the tie-breaker
+direction open. All three of its load-bearing claims fail when measured; the concern
+underneath it is real and is carried forward as FR-004.
+
+**1. It breaks the read-only rule, and does it invisibly.** `fastfetch` auto-loads
+`config.jsonc` from the five search paths it prints under `--list-config-paths`
+(`~/.config/fastfetch/`, `~/.config/kdedefaults/fastfetch/`, `/etc/xdg/fastfetch/`,
+`/etc/fastfetch/`, `~/fastfetch/`), and its `command` module executes an arbitrary shell
+string. **Verified** against fastfetch 2.68.1 with a config holding one `command` module,
+invoking it with no flags at all:
+
+```
+fastfetch --pipe          -> "Proof: autoloaded", and the file it was told to
+                             create existed afterwards
+fastfetch --pipe -c none  -> no such file; the config was not read
+```
+
+Under the documented `sudo bash hw-inventory.sh` that executes as root, out of
+`/root/.config/fastfetch/` or `/etc/fastfetch/`. This is a class the banned-verb list did
+not cover, because the verb is a query and the *host's config file* supplies the write —
+the rule in `CLAUDE.md` was extended to name it. `-c none` does close this particular
+hole, but the read-only property would then rest on auditing a third-party tool's module
+set at every release rather than on reading this script, and that is the trade the
+read-only-by-construction design exists to refuse. It is also the property that lets the
+script run unattended.
+
+**2. fastfetch is not an independent source.** It reads the same kernel interfaces the
+script does, so it is a second *parser*, not a second *source*. **Verified** on
+`lab-desktop-01`:
+
+| Fact | Script reads | fastfetch reports | Relationship |
+|---|---|---|---|
+| Memory | `free` → `/proc/meminfo` `MemTotal: 31977708 kB` | `32745172992` bytes = **31977708 kB** | byte-identical, same file |
+| OS | sources `/etc/os-release` | `prettyName: CachyOS`, `id: cachyos` | same file |
+| Kernel | `uname -r` → `7.2.2-1-cachyos` | `7.2.2-1-cachyos` | same call |
+| Model | `dmidecode` decode of SMBIOS | `/sys/.../dmi/id/product_name` = `MS-7D67` | same SMBIOS table, two decoders |
+
+Correlated sources cannot adjudicate each other: a wrong *value* — the error class the
+request wants caught — passes through both identically. What a disagreement would
+actually surface is a formatting difference (`30Gi` vs `32745172992`), which makes the
+requested reconciliation policy a unit-conversion table rather than a verification.
+**Generalise this before evaluating the next such request:** a tool that reads the same
+file is not a second opinion, whatever its name is.
+
+**3. The proposed tie-breaker direction is backwards.** Where the two genuinely diverge
+it is because this script deliberately chose the more authoritative or more specific
+source. Naming fastfetch authoritative would let a terminal-banner tool overrule
+`dmidecode`'s SMBIOS decode, emhttp's `.ini` array state, and the whitelisted config
+parsing. And under the exit-code contract a disagreement is not a collector failure, so
+it could not `warn` either — it would be a report annotation with no route to action.
+
+Supporting, not load-bearing: runtime is not the objection (6–7 ms per run, measured over
+three runs), but bulk is — the JSON is **11,890 bytes against a whole report of 8,532**,
+and the majority of it is desktop-session metadata (DE, WM theme, icons, cursor, terminal
+font) with no place in a server inventory. The modules that do not overlap are already
+covered better by accepted work: `Display` reads the same DRM EDID as FR-001 and names
+the same `VX2768-2KP` panel, and `Battery`/`PowerAdapter` read the
+`/sys/class/power_supply` that FR-002 **verified** is empty on the host the UPS is
+actually attached to.
+
+### FR-004 — unprivileged system identity from DMI sysfs — accepted with changes
+
+The genuine gap FR-003 surfaced, reachable without the dependency that sank it. An
+unprivileged run currently prints `| Manufacturer / model | (needs root — install/run
+dmidecode as root) |` and emits `model: null` into the frontmatter, while the values sit
+in world-readable files. **Verified** on this host:
+
+```
+-r--r--r--  sys_vendor      Micro-Star International Co., Ltd.
+-r--r--r--  product_name    MS-7D67
+-r--r--r--  board_name      PRO X670-P WIFI (MS-7D67)
+-r--r--r--  bios_version    1.A0
+-r--------  product_serial  Permission denied
+-r--------  board_serial    Permission denied
+```
+
+Reading `/sys/devices/virtual/dmi/id/` where `dmidecode` is absent or unprivileged is the
+same move already made twice: emhttp's `.ini` instead of `mdcmd`, and FR-002's sysfs
+`idVendor` instead of `lsusb -v`. It also matches what this script already does one field
+over — `CPUMODEL` falls back from `lscpu` to `/proc/cpuinfo` and warns only if both fail.
+DMI identity is the outlier that has no fallback. Conditions:
+
+- **Serials stay root-gated and stay honest.** `product_serial`, `board_serial` and
+  `product_uuid` are mode `-r--------`; only the freely-readable fields get filled in.
+  The header's "**not run as root**, some fields incomplete" note stays correct, and the
+  service-tag row must not silently become `—` as though the host had no serial.
+- **Skip the fallback inside containers.** An LXC generally sees the *host's* sysfs, so a
+  naive read would make every container on a Proxmox node report the node's motherboard
+  as its own — and put it in the machine-readable `model:` field, which is worse than
+  the null it replaces. `PLATFORM` is already computed from `systemd-detect-virt` above
+  the DMI block; gate on the container case specifically (`systemd-detect-virt -c`), not
+  on `PLATFORM != bare-metal`, since a real VM's SMBIOS identity is legitimate inventory.
+  **Unverified** — no container available in this environment. Confirm on a Proxmox LXC
+  before shipping; this is the same false-row class as C-012's zvols and FR-001's
+  writeback connectors, both of which were missed by the reviewer who proposed the
+  feature.
+- **Filter placeholder strings.** `To Be Filled By O.E.M.`, `Default string`, `System
+  Product Name`, `Not Specified`, `None` are common on whitebox boards. `dmidecode -s`
+  returns them verbatim too, so the root path has the same exposure today — but the
+  fallback would put them into `model:` on far more hosts. An unfilled field should read
+  as unknown, not as a model name. **Unverified**: this board fills its DMI properly.
+- **It must never `warn`.** Absent `/sys/devices/virtual/dmi/id` is a normal container,
+  and the root path's existing warning already covers "`dmidecode` ran as root and
+  returned nothing". Same call as `zpool`/`btrfs` and both prior FRs.
+- The identity block's `is_root && have dmidecode` gate has to be restructured, since
+  there are now three states rather than two: full identity, partial identity from
+  sysfs, and nothing. Do not let the partial state print the "(needs root)" row *and*
+  the values.
+
 ---
 
 ## Verified reviewer claims

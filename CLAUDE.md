@@ -39,6 +39,16 @@ Banned regardless of context: `smartctl -t`, `mdcmd`, `zpool scrub/import/export
 `modprobe`, `mount`/`umount`, any package manager, any write verb on `perccli`/`storcli`/
 `megacli`, and `ipmitool chassis`/`sel clear`/`mc reset`/`raw`.
 
+**The ban covers the tool's config, not just its verb.** A banned-verb list can only
+describe commands this script writes; it cannot see a tool whose behaviour is defined by
+a file on the host. Worked example, measured: `fastfetch` auto-loads `config.jsonc` from
+five search paths — `/etc/fastfetch/` among them — and its `command` module runs an
+arbitrary shell string, so a bare `fastfetch` with no flags created a file on this host,
+and would do it as root under the documented `sudo` invocation (FR-003). Before adding
+any dependency, ask what it reads at startup and whether that can execute. A flag that
+suppresses it (`-c none` does) is not sufficient on its own: it moves the read-only
+guarantee from this script's source into a third party's release notes.
+
 When adding a vendor CLI, allow only `show`-class verbs and say so in a comment.
 
 ---
@@ -103,6 +113,14 @@ argument are in the ledger under the same ID.
 - **Converting whitespace-split lists to arrays** (O-001) — rejected as a *priority*, not
   as an edit. Device names from `lsblk` and VMIDs from `pct list` are whitespace-free by
   construction. Harmless to do; not a correctness fix, and not to be sold as one.
+- **A `fastfetch` cross-check** (FR-003, issue #1). Two facts settle it. It breaks the
+  read-only rule invisibly — a bare `fastfetch` executes `command` modules out of the
+  host's `config.jsonc`, verified by watching it create a file. And it is not a second
+  source: its `MemTotal` is byte-identical to `/proc/meminfo`, its OS fields come from
+  `/etc/os-release`, its model from the same SMBIOS table `dmidecode` decodes. **A tool
+  that reads the same file is not a second opinion** — apply that to the next
+  cross-check proposal (`neofetch`, `inxi`, `hwinfo`) without re-measuring. The real gap
+  it surfaced is FR-004.
 - **Splitting the file into `section_*()` functions** (C-031) — deferred, not rejected.
   Real improvement, but it restructures a working one-shot reporter; not worth the churn
   until `--skip` / section selection is actually wanted.
@@ -124,9 +142,17 @@ argument are in the ledger under the same ID.
 - **FR-002** — UPS data-connection detection. Accepted with changes, the load-bearing one
   being that the primary signal is a sysfs read of `idVendor` rather than `lsusb`, and
   that `/sys/class/power_supply` cannot be the gate.
+- **FR-004** — fill manufacturer/model/motherboard/BIOS from `/sys/devices/virtual/dmi/id/`
+  when `dmidecode` is absent or unprivileged; those files are world-readable while
+  serials are not. Today an unprivileged run emits `model: null` with the value sitting
+  in a readable file. Accepted with **four conditions** (serials stay root-gated; skip it
+  inside containers, which see the *host's* DMI; filter `To Be Filled By O.E.M.`-class
+  placeholders; never `warn`).
 
-Read the ledger entry before implementing either FR: for an accepted-with-changes item
-the conditions **are** the acceptance, and both were written against a real host.
+Read the ledger entry before implementing any of these FRs: for an accepted-with-changes
+item the conditions **are** the acceptance. Each was written against a real host, and
+FR-004 marks the two conditions that could not be verified here — confirm those on a
+Proxmox LXC and a whitebox board rather than shipping them on reasoning alone.
 
 ### Done — do not re-implement
 
