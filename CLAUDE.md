@@ -82,6 +82,13 @@ It is a publishing rule, and the distinction is where the data lands: writing a 
 identity into a report on the operator's own disk is the product, committing it here is
 disclosure.
 
+**"Real names" includes the maintainer's own**, which is the one that slips through,
+because it looks like ordinary attribution rather than data. Say `foxythefoxer` — a GitHub
+handle is already public by construction, and it is the identity this repo is published
+under. The personal name behind it appears nowhere: not in a file, a commit message, a
+commit trailer, or an issue comment. A private notes vault addressing its owner by first
+name is correct there and wrong the moment the sentence is copied out.
+
 The test that settles the cases in between: **`hw-inventory.sh` is generic and belongs
 here; its reports are nothing but hostnames, serials and MACs, and never do.** Do not
 commit a sample report, and do not paste one into a review, a disposition, or a fixture.
@@ -103,9 +110,11 @@ neither can a scanner. T9's iSCSI fixture carried a live address from that estat
 arrive as issues; adjudications get posted back as issue comments. Both are world-readable,
 and the verdict comment is written by *this* session — a leak there is this session's to
 make, not the filer's. Everything above applies to issue text unchanged, plus one thing
-files don't tempt you into: **do not name the private vault, its notes, or the agent that
-files from it.** Credit the filing without identifying the estate — "filed from a private
-vault session" is the whole of what a public tracker needs. A verdict comment quotes the
+files don't tempt you into: **do not name the private vault or any of its notes.** The
+filing agent and its own brief may be named — those identify an agent, not an estate — but
+the vault's name and its filenames carry its internal structure, and a citation like
+"per `some-decisions-note.md`, 2026-09-05 entry" is a provenance habit that reads as
+courtesy inside the vault and as disclosure outside it. A verdict comment quotes the
 measurement, not the machine, exactly as the ledger does. And write it right the first
 time: editing an issue afterwards does not reliably remove anything, since GitHub keeps the
 prior revision in the edit history.
