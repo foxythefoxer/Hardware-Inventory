@@ -6,8 +6,8 @@ produced the verdict. Two streams share this ledger, told apart by ID prefix:
 - **`C-` Claude Opus 5, `G-` Grok 4.5, `O-` GPT-5.5** — findings from the three code
   reviews in [`reviews/`](reviews/). A closed set: one prompt, three models, 2026-08-06.
   Numbering does not correspond across those documents, which is why the prefixes exist.
-- **`FR-`** — requests submitted from outside the review cycle, via a private notes vault's
-  Dev Projects Feature Request Log. Open-ended; new ones land here.
+- **`FR-`** — requests submitted from outside the review cycle, filed as GitHub issues by a
+  session working in a private notes vault. Open-ended; new ones land here.
 
 `CLAUDE.md` is loaded into every session, so it carries only the one-line verdict per ID
 and points here. This file is opened when the reasoning is actually wanted. **Write the
@@ -203,8 +203,8 @@ read-only-by-construction design exists to refuse. It is also the property that 
 script run unattended.
 
 **2. fastfetch is not an independent source.** It reads the same kernel interfaces the
-script does, so it is a second *parser*, not a second *source*. **Verified** on
-`lab-desktop-01`:
+script does, so it is a second *parser*, not a second *source*. **Verified** on one
+whitebox AM5 desktop, all four rows read in the same run:
 
 | Fact | Script reads | fastfetch reports | Relationship |
 |---|---|---|---|

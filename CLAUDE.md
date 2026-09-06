@@ -8,10 +8,18 @@ The verdicts here are one line each. The reasoning behind them — measurements,
 conditions, what was checked against a real host — lives in
 [`docs/DISPOSITIONS.md`](docs/DISPOSITIONS.md) under the same IDs: `C-`/`G-`/`O-` for the
 three code reviews in `docs/reviews/`, `FR-` for a request submitted from outside the
-review cycle, via the vault's Dev Projects Feature Request Log. **A new adjudication,
+review cycle as a GitHub issue — see "This repo is public" below. **A new adjudication,
 accepted or rejected, is written out there and indexed here in one line — never written
 at length in both files.** This file is loaded into every session; the ledger is opened
 when the reasoning is actually wanted, which is why the long form belongs in it.
+
+**An index line never enumerates a numbered condition set.** "Accepted with four binding
+conditions (a; b; c; d)" is the long form in miniature, and it drifts exactly as the long
+form would: the FR-001 line here silently swapped one of the ledger's four conditions for
+a sentence from its preamble, and the FR-004 line said "four" where the ledger lists five,
+dropping the one an implementer most needs. Both survived until a reader compared the two
+files by hand, which is not a control. State the verdict and the single fact that settles
+it; the conditions live in the ledger.
 
 ---
 
@@ -37,7 +45,9 @@ it breaks the reason the script can be automated at all.
 Banned regardless of context: `smartctl -t`, `mdcmd`, `zpool scrub/import/export/create`,
 `btrfs balance/scrub/device`, `docker run/exec/rm/pull`, `pct`/`qm` start/stop/set/destroy,
 `modprobe`, `mount`/`umount`, any package manager, any write verb on `perccli`/`storcli`/
-`megacli`, and `ipmitool chassis`/`sel clear`/`mc reset`/`raw`.
+`megacli`, `ipmitool chassis`/`sel clear`/`mc reset`/`raw`, and `ddcutil` — DDC/CI is a
+bidirectional protocol over `i2c-dev`, so querying a monitor with it writes to the
+monitor. That last one is why FR-001 reads EDID out of sysfs instead.
 
 **The ban covers the tool's config, not just its verb.** A banned-verb list can only
 describe commands this script writes; it cannot see a tool whose behaviour is defined by
@@ -50,6 +60,61 @@ suppresses it (`-c none` does) is not sufficient on its own: it moves the read-o
 guarantee from this script's source into a third party's release notes.
 
 When adding a vendor CLI, allow only `show`-class verbs and say so in a comment.
+
+---
+
+## This repo is public; its inputs are not
+
+`foxythefoxer/Hardware-Inventory` is a public GitHub repository. Everything committed here
+is published — this file, the ledger, the fixtures, the commit messages.
+
+Some of the work that lands here originates elsewhere: feature requests arrive as GitHub
+issues filed by a session working in a private notes vault that documents a real homelab
+(FR-003 was issue #1), and dispositions get argued from measurements taken on real hosts
+in that estate. **That session has rules keeping estate detail inside the vault. This one
+is the receiving end, and had none — hence this section.**
+
+**Never commit estate identity.** No hostnames, IP addresses, MAC addresses, network
+topology, tailnet addresses, real names or email addresses — not in this file, not in the
+ledger, not in test fixtures, not in commit messages. This is not a secrets rule; serials,
+MACs and IPs are precisely what the script exists to *emit*, and Conventions below says so.
+It is a publishing rule, and the distinction is where the data lands: writing a host's
+identity into a report on the operator's own disk is the product, committing it here is
+disclosure.
+
+The test that settles the cases in between: **`hw-inventory.sh` is generic and belongs
+here; its reports are nothing but hostnames, serials and MACs, and never do.** Do not
+commit a sample report, and do not paste one into a review, a disposition, or a fixture.
+
+**Evidence in the ledger names the measurement, not the machine.** An adjudication is only
+auditable if it says what was actually checked, so keep the byte counts, file modes,
+timings and hardware models that carry the argument — a `VX2768-2KP` on DP-1 is a panel
+anyone can buy. A hostname is a machine on someone's LAN, and one had been sitting in
+FR-003 since it was written. Where a claim needs its host identified at all, identify it by
+class: "a Proxmox LXC", "a whitebox AM5 desktop", "the Unraid box".
+
+**Fixtures use the documentation ranges** — RFC 5737 `192.0.2.0/24`, `198.51.100.0/24`,
+`203.0.113.0/24` for addresses, RFC 7042 `00:00:5E:00:53:00`–`FF` for MACs. Never an
+RFC 1918 address or a real OUI: a reader cannot tell those apart from a live one, and
+neither can a scanner. T9's iSCSI fixture carried a live address from that estate until
+2026-09-05, which is what this rule exists to prevent.
+
+**The issue tracker is part of that public surface, and the replies are yours.** Requests
+arrive as issues; adjudications get posted back as issue comments. Both are world-readable,
+and the verdict comment is written by *this* session — a leak there is this session's to
+make, not the filer's. Everything above applies to issue text unchanged, plus one thing
+files don't tempt you into: **do not name the private vault, its notes, or the agent that
+files from it.** Credit the filing without identifying the estate — "filed from a private
+vault session" is the whole of what a public tracker needs. A verdict comment quotes the
+measurement, not the machine, exactly as the ledger does. And write it right the first
+time: editing an issue afterwards does not reliably remove anything, since GitHub keeps the
+prior revision in the edit history.
+
+**Requests arrive; nothing tracks them home.** The filing session records that a request
+was submitted and what the verdict was, then stops by design — it does not track whether
+this repo implemented anything, and it deletes accepted items from its own backlog once
+adjudicated. The "Agreed work queue" below is therefore the *only* record that an accepted
+FR is still outstanding. Nothing outside this repo will notice if it rots.
 
 ---
 
@@ -136,23 +201,22 @@ argument are in the ledger under the same ID.
 - **C-004** (LOW) — escape `|` in Markdown table cells. Most pipe-bearing output already
   sits inside code fences.
 - **C-005** — `/etc/os-release` is sourced, which executes it as root.
-- **FR-001** — monitor detection via DRM EDID. Accepted with **four binding conditions**
-  (never `warn`; gate on bytes read rather than file size; exclude `*-Writeback-*`;
-  `ddcutil` stays banned because DDC/CI writes to the monitor).
+- **FR-001** — monitor detection via DRM EDID, read from `/sys/class/drm/card*-*/edid`.
+  Displays are the one category of attached hardware the script cannot see, and sysfs
+  reads work headless where `xrandr` needs a session. Accepted with binding conditions.
 - **FR-002** — UPS data-connection detection. Accepted with changes, the load-bearing one
   being that the primary signal is a sysfs read of `idVendor` rather than `lsusb`, and
   that `/sys/class/power_supply` cannot be the gate.
 - **FR-004** — fill manufacturer/model/motherboard/BIOS from `/sys/devices/virtual/dmi/id/`
   when `dmidecode` is absent or unprivileged; those files are world-readable while
   serials are not. Today an unprivileged run emits `model: null` with the value sitting
-  in a readable file. Accepted with **four conditions** (serials stay root-gated; skip it
-  inside containers, which see the *host's* DMI; filter `To Be Filled By O.E.M.`-class
-  placeholders; never `warn`).
+  in a readable file. Accepted with binding conditions.
 
 Read the ledger entry before implementing any of these FRs: for an accepted-with-changes
-item the conditions **are** the acceptance. Each was written against a real host, and
-FR-004 marks the two conditions that could not be verified here — confirm those on a
-Proxmox LXC and a whitebox board rather than shipping them on reasoning alone.
+item the conditions **are** the acceptance, and the summary line above is deliberately not
+a substitute for them. Each was written against a real host, and FR-004 marks the
+conditions that could not be verified here — confirm those on a Proxmox LXC and a whitebox
+board rather than shipping them on reasoning alone.
 
 ### Done — do not re-implement
 
