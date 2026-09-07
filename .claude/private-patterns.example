@@ -1,0 +1,43 @@
+# Copy to `.claude/private-patterns.local` — which is gitignored — and fill in.
+#
+# One extended-regex per line, matched case-insensitively against anything about
+# to be written or committed. Blank lines and `#` comments are ignored.
+#
+# This file exists because the things it lists cannot live in a published file.
+# The publishing rule bars the maintainer's own name from this repository, and
+# the hook that matches on it is committed to this repository. So the shapes a
+# matcher can derive on its own — RFC 1918 addresses, CGNAT space, MAC and OUI
+# forms — are built into `.claude/hooks/no-estate-identity.sh`, and only the
+# things it has to be TOLD go here.
+#
+# The hook refuses to run at all when the local copy is missing. That is
+# deliberate: a fresh clone with no pattern list has no protection, and the one
+# failure mode worse than no hook is a hook that looks like it is working.
+#
+# What belongs here:
+#
+#   - The maintainer's personal name, given and family, and any spelling of it
+#     that would read as ordinary attribution. `foxythefoxer` is the identity
+#     this repo publishes under and must NOT be listed — a GitHub handle is
+#     public by construction.
+#   - Email addresses.
+#   - Hostnames of real machines in the estate, including short names. Identify
+#     a host by class instead: "a Proxmox LXC", "the Unraid box".
+#   - The name of the private notes vault, and the filenames of notes in it.
+#     A citation like "per <some-note>.md, 2026-09-05 entry" reads as courtesy
+#     inside the vault and as disclosure outside it.
+#   - Any tailnet or LAN domain suffix.
+#
+# What does NOT belong here: hardware models, panel models, byte counts, file
+# modes and timings. Those are the measurements that make an adjudication
+# auditable, and they are publishable — a monitor anyone can buy is not estate
+# identity.
+#
+# Anchor with \b where a fragment could appear inside an ordinary word.
+
+# \bexample-hostname\b
+# \bgiven-name\b
+# \bfamily-name\b
+# someone@example\.com
+# \.example-tailnet\.ts\.net\b
+# \bmy-notes-vault\b

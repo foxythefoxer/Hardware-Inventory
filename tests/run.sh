@@ -442,6 +442,91 @@ else
   try 0 'allows a verb as an argument' 'grep -rn "mdcmd" docs/ README.md'
 fi
 
+# ---------------------------------------------------- T14 hook: leak shapes ---
+# The publishing rule's mechanical half. Two commits in this repo's history
+# exist only to repair leaks of exactly these shapes, and both were caught by a
+# human reading the file afterwards.
+#
+# Every address and MAC below is ASSEMBLED FROM OCTETS, never written whole.
+# That is not decoration: this file is committed to the public repo the hook
+# guards, and a literal private-range address here would be the very thing the
+# pre-commit hook refuses to accept. The test data cannot be a copy of what the
+# rule forbids.
+head_ "T14  Publishing hook (.claude/hooks/no-estate-identity.sh)"
+
+LHOOK="$HERE/../.claude/hooks/no-estate-identity.sh"
+if ! command -v jq >/dev/null 2>&1; then
+  printf '  \033[33mSKIP\033[0m  jq not installed\n'
+elif [ ! -r "$LHOOK" ]; then
+  bad "hook missing: $LHOOK"
+elif [ ! -r "$HERE/../.claude/private-patterns.local" ]; then
+  # Not a failure: the private list is gitignored by design, so a fresh clone
+  # and CI both legitimately lack it. The hook's own refusal to run without it
+  # is asserted below, which is the half that can be checked from here.
+  printf '  \033[33mSKIP\033[0m  no private-patterns.local (expected in a fresh clone)\n'
+  printf '%s' 'x' | jq -Rs '{tool_name:"Write",tool_input:{content:.}}' \
+    | bash "$LHOOK" --hook >/dev/null 2>&1
+  [ $? -eq 2 ] && ok "refuses to run when the private list is absent" \
+                || bad "ran without a private list — an inert hook looks like a working one"
+else
+  P1=10; P2=192.168; P3=172.20; P4=100.101      # RFC 1918 x3, then CGNAT
+  # One octet per variable, the device half included. Writing the last three
+  # octets together would itself be an OUI-shaped triple, and the hook rejects
+  # one — as it did on the commit that added this test, and again on the edit
+  # that tried to explain why in a comment quoting the offending form. That is
+  # the shortest available proof that the matcher is not inert.
+  H1=3c; H2=ec; H3=ef; H4=1a; H5=2b; H6=3c
+  OUI="$H1:$H2:$H3"; MAC="$OUI:$H4:$H5:$H6"
+
+  ltry() { # ltry <expected-exit> <label> <text>
+    printf '%s' "$3" | jq -Rs '{tool_name:"Write",tool_input:{content:.}}' \
+      | bash "$LHOOK" --hook >/dev/null 2>&1
+    R=$?
+    [ "$R" -eq "$1" ] && ok "$2" || bad "$2 — exit $R, expected $1"
+  }
+
+  ltry 2 'blocks an RFC 1918 /8 address'   "answers on $P1.0.4.17 today"
+  ltry 2 'blocks an RFC 1918 /16 address'  "gateway is $P2.1.1"
+  ltry 2 'blocks an RFC 1918 /12 address'  "bridge sits on $P3.0.9"
+  ltry 2 'blocks CGNAT / tailnet space'    "reachable at $P4.7.9"
+  ltry 2 'blocks a real MAC'               "link/ether $MAC"
+  ltry 2 'blocks a bare vendor OUI'        "prefix $OUI is a real card"
+  ltry 2 'scans a Bash command too'        "gh issue comment 1 -b 'on $P2.0.30'"
+
+  # The pass half. Fixtures are REQUIRED to use these ranges, so a hook that
+  # rejects them makes the rule unfollowable — this is the over-eager direction,
+  # and it is the one that gets a hook switched off.
+  ltry 0 'allows RFC 5737 TEST-NET-1'      'fixture address 192.0.2.15'
+  ltry 0 'allows RFC 5737 TEST-NET-2'      'iSCSI target at 198.51.100.5:3260'
+  ltry 0 'allows RFC 5737 TEST-NET-3'      'bridge=203.0.113.1'
+  ltry 0 'allows an RFC 7042 doc MAC'      'link/ether 00:00:5e:00:53:af brd ff:ff:ff:ff:ff:ff'
+  ltry 0 'allows the broadcast MAC'        'brd ff:ff:ff:ff:ff:ff'
+  ltry 0 'allows a clock time'             'finished at 10:24:31 after 12:00:05'
+  ltry 0 'allows the GitHub handle'        'published by foxythefoxer under MIT'
+  ltry 0 'allows a host named by class'    'measured on a Proxmox LXC and an Unraid box'
+  ltry 0 'allows a hardware model'         'VX2768-2KP on DP-1, edid 128 bytes, mode 0444'
+  ltry 0 'allows a loopback address'       'listening on 127.0.0.1:8080'
+
+  # commit-msg mode: the publishing rule names commit messages explicitly, and
+  # a pre-commit hook runs before there is one.
+  printf 'Fix the probe\n\nSeen on %s.0.4.14 last night.\n' "$P1" > "$TMP/msg"
+  bash "$LHOOK" --file "$TMP/msg" >/dev/null 2>&1
+  [ $? -eq 2 ] && ok "blocks a commit message carrying an address" || bad "commit-msg mode did not block"
+  printf 'Fix the probe\n\nMeasured on a Proxmox LXC.\n' > "$TMP/msg"
+  bash "$LHOOK" --file "$TMP/msg" >/dev/null 2>&1
+  [ $? -eq 0 ] && ok "passes a commit message naming a host class" || bad "clean commit message was blocked"
+
+  # Every tracked file must pass. This is the regression test that matters: the
+  # fixtures are full of documentation-range addresses and MACs on purpose, and
+  # a matcher that flags them makes the whole repo uncommittable.
+  LEAKY=0
+  for f in $(cd "$HERE/.." && git ls-files 2>/dev/null); do
+    printf '%s' "$(cat "$HERE/../$f")" | jq -Rs '{tool_name:"Write",tool_input:{content:.}}' \
+      | bash "$LHOOK" --hook >/dev/null 2>&1 || { LEAKY=$((LEAKY+1)); echo "        flagged: $f"; }
+  done
+  [ "$LEAKY" -eq 0 ] && ok "no tracked file trips the matcher" || bad "$LEAKY tracked file(s) flagged"
+fi
+
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

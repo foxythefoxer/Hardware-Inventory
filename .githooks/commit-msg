@@ -1,0 +1,6 @@
+#!/bin/sh
+# The publishing rule names commit messages explicitly, and a pre-commit hook
+# cannot see the message — it runs before there is one. Hence a second hook.
+#
+# Enable with:  git config core.hooksPath .githooks
+exec "$(dirname "$0")/../.claude/hooks/no-estate-identity.sh" --file "$1"

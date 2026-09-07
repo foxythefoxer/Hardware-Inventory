@@ -14,6 +14,15 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/no-write-verbs.sh"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/no-estate-identity.sh --hook"
+          }
+        ]
       }
     ]
   }

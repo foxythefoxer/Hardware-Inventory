@@ -1,0 +1,9 @@
+#!/bin/sh
+# Scans the staged diff for estate identity before it becomes a commit.
+#
+# A PreToolUse hook only sees what an agent writes. This is the surface that
+# covers a hand-edit, and it is the last point at which a leak is still cheap to
+# fix — after the commit it is in the reflog, and after the push it is published.
+#
+# Enable with:  git config core.hooksPath .githooks
+exec "$(dirname "$0")/../.claude/hooks/no-estate-identity.sh" --staged
