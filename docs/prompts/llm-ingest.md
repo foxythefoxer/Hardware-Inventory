@@ -103,9 +103,6 @@ run that surfaces a real failing disk gets skimmed past with the rest.
 
 ## Diffing runs
 
-Volatile fields are grouped under `### Snapshot` so they can be excluded:
-
-```bash
-diff <(sed '/^### Snapshot/,/^$/d' old.md) \
-     <(sed '/^### Snapshot/,/^$/d' new.md)
-```
+Volatile fields are grouped under `### Snapshot` so two runs can be compared with the
+noise excluded. The recipe is in the top-level [README](../../README.md#diffing-two-runs);
+it is not repeated here, because a `sed` range copied into two files drifts in one of them.
