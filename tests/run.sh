@@ -190,8 +190,11 @@ grep -q 'End of report' "$TMP/w.md" && ok "still writes the full report" || bad 
 mkdir -p "$TMP/minbin"
 # bash and sh are in the list because the PATH= prefix below also governs how
 # `bash` itself is resolved — without them the run dies at 127 before starting.
+# `strings` is in the list but `edid-decode` deliberately is not: T15 reuses
+# this PATH to exercise the EDID fallback, which is otherwise only ever tested
+# on machines that happen to lack edid-decode.
 for u in bash sh uname hostname date id awk gawk sed grep cat head tail wc ls \
-         paste basename timeout sort tr cut; do
+         paste basename timeout sort tr cut strings readlink; do
   p=$(command -v "$u" 2>/dev/null) && ln -sf "$p" "$TMP/minbin/$u"
 done
 
@@ -526,6 +529,105 @@ else
   done
   [ "$LEAKY" -eq 0 ] && ok "no tracked file trips the matcher" || bad "$LEAKY tracked file(s) flagged"
 fi
+
+# ------------------------------------------------------------ T15 displays ---
+# FR-001. The three conditions that came out of adjudicating it are exactly the
+# three that a naive implementation gets wrong, so each is asserted separately:
+# a zero-STAT-but-non-empty edid must produce a row, a Writeback connector must
+# not, and the section must never warn.
+#
+# The fixture EDID is synthetic, not a dump of a real panel: a report's serials
+# belong on the operator's disk, never in this repo. It is a valid 1.3 blob, so
+# `edid-decode` parses it where installed and `strings` recovers the same two
+# strings where it is not — CI has neither guaranteed, hence assertions that
+# hold either way.
+head_ "T15  Display detection via DRM EDID"
+
+sed -e "s#/sys/class/drm#$FIX/drm#g" "$SCRIPT" > "$TMP/drm.sh"
+bash "$TMP/drm.sh" > "$TMP/d.md" 2>"$TMP/d.err"; RC=$?
+
+# Binary read through a shell variable is the trap here: a raw EDID captured in
+# a command substitution makes bash write "ignored null byte in input" to
+# stderr, which T2 would only catch on a machine that has a monitor attached.
+[ ! -s "$TMP/d.err" ] && ok "stderr empty (no NUL-byte warning from the EDID read)" \
+  || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/d.err"; }
+[ $RC -eq 0 ] && ok "exits 0 — a display section never warns" || bad "exit $RC — expected 0"
+grep -q '^| card1-DP-1 |' "$TMP/d.md" && ok "connector row emitted" || bad "connector row missing"
+grep -q 'TESTMON-27' "$TMP/d.md" && ok "product name recovered" || bad "product name missing"
+grep -q 'SN0123456789' "$TMP/d.md" && ok "panel serial recovered" || bad "panel serial missing"
+grep -q 'card1-DP-2' "$TMP/d.md" \
+  && bad "disconnected connector (0-byte edid) produced a row" || ok "0-byte edid produces no row"
+# The stat-0 trap, and the only assertion here that a plain file cannot make:
+# EVERY real edid attribute reports `stat -c%s` = 0, including the ones handing
+# back a full 256 bytes, so a `[ -s ]` gate skips every monitor on the host. A
+# committed fixture cannot reproduce that — a 128-byte file has a 128-byte stat
+# — so card1-DP-8/edid is a symlink to a procfs file, which is the one thing
+# available that stats as 0 and still reads non-empty. Its contents are not an
+# EDID and are not meant to be: the assertion is that the ROW EXISTS AT ALL.
+# Without this case the size-gate defect passes the whole suite, which is how
+# it was found here.
+grep -q '^| card1-DP-8 |' "$TMP/d.md" \
+  && ok "stat-0 but non-empty edid still produces a row" \
+  || bad "gated on file size, not bytes read — every real monitor would be skipped"
+# Excluded BY NAME, and the fixture proves it: card1-Writeback-1 holds the same
+# valid EDID as card1-DP-1, so an emptiness filter alone would let it through.
+grep -q 'Writeback' "$TMP/d.md" \
+  && bad "Writeback connector emitted as a physical display" || ok "Writeback connector excluded"
+
+# The `strings` fallback, forced. Without this the two parser paths are each
+# tested only on hosts that happen to lack the other tool — this machine has
+# edid-decode and CI does not, so neither run covers both. $TMP/minbin is T8's
+# stripped PATH, which carries `strings` and deliberately not `edid-decode`.
+PATH="$TMP/minbin" bash "$TMP/drm.sh" > "$TMP/dnodec.md" 2>"$TMP/dnodec.err"
+[ ! -s "$TMP/dnodec.err" ] && ok "fallback: stderr empty" \
+  || { bad "fallback: stderr not empty:"; sed 's/^/        /' "$TMP/dnodec.err"; }
+grep -q 'TESTMON-27' "$TMP/dnodec.md" && grep -q 'SN0123456789' "$TMP/dnodec.md" \
+  && ok "fallback: strings recovers name and serial without edid-decode" \
+  || bad "fallback: strings path lost the name or the serial"
+grep -q 'edid-decode` is not installed' "$TMP/dnodec.md" \
+  && ok "fallback: report says the two values are not separated" || bad "fallback: no note that the column is raw EDID text"
+
+# ----------------------------------------------------------------- T16 UPS ---
+# FR-002. The load-bearing condition is that the sysfs idVendor read is the
+# PRIMARY signal, not a fallback: the fixture supplies only sysfs, and no
+# apcupsd/NUT/power_supply state exists on the runner, so a row can only come
+# from the file read. The negative half matters as much — most hosts have no
+# UPS, and a section that printed "none detected" would break the standing
+# rule that a section prints only when it has something to say.
+head_ "T16  UPS data-connection detection"
+
+sed -e "s#/sys/bus/usb/devices#$FIX/usb#g" \
+    -e "s#/etc/apcupsd/apcupsd.conf#$FIX/apcupsd/apcupsd.conf#g" "$SCRIPT" > "$TMP/usb.sh"
+bash "$TMP/usb.sh" > "$TMP/ups.md" 2>"$TMP/ups.err"; RC=$?
+
+[ ! -s "$TMP/ups.err" ] && ok "stderr empty" || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/ups.err"; }
+[ $RC -eq 0 ] && ok "exits 0 — a UPS section never warns" || bad "exit $RC — expected 0"
+grep -q '^### UPS' "$TMP/ups.md" && ok "section emitted from the sysfs read alone" || bad "no UPS section"
+grep -q 'FIXTURE-UPS-1500' "$TMP/ups.md" && ok "device product name read" || bad "product name missing"
+grep -q '0764:0601' "$TMP/ups.md" && ok "vendor:product IDs read" || bad "USB IDs missing"
+grep -q 'driver usbhid' "$TMP/ups.md" && ok "bound interface driver resolved" || bad "driver not resolved"
+# The whitelist is the whole filter. A keyboard on the same bus must not become
+# a UPS row, or the section reports every USB device on the host.
+grep -q 'FIXTURE-KEYBOARD' "$TMP/ups.md" \
+  && bad "a non-UPS USB device was reported as a UPS" || ok "non-UPS vendor ID filtered out"
+
+# The second signal: configured intent, readable whether or not the daemon is
+# running. Whitelisted keys, so the same assertion T4 makes about var.ini's
+# csrf_token applies here — this file is parsed, never dumped.
+grep -q 'CANARY_APCUPSD_MUST_NOT_LEAK' "$TMP/ups.md" \
+  && bad "SECRET LEAK: a non-whitelisted apcupsd.conf key appeared in output" \
+  || ok "non-whitelisted apcupsd.conf keys not emitted"
+grep -q 'UPSCABLE=usb' "$TMP/ups.md" && ok "apcupsd config read" || bad "apcupsd config missing"
+
+# Nothing attached, nothing installed: no section at all. $TMP/minbin is T8's
+# stripped PATH, reused so that upower and apcaccess are genuinely absent, and
+# the config path is pointed at nothing — without both, this half passes or
+# fails depending on what happens to be installed on whoever's machine runs it.
+sed -e "s#/sys/bus/usb/devices#$TMP/no-such-usb#g" \
+    -e "s#/etc/apcupsd/apcupsd.conf#$TMP/no-such-apcupsd.conf#g" "$SCRIPT" > "$TMP/noups.sh"
+PATH="$TMP/minbin" bash "$TMP/noups.sh" > "$TMP/noups.md" 2>/dev/null
+grep -q '^### UPS' "$TMP/noups.md" \
+  && bad "UPS section printed with no UPS present" || ok "silent when no UPS is detected"
 
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

@@ -2,7 +2,8 @@
 
 A read-only hardware inventory script for Linux homelabs. Run it on a host, get a
 Markdown report on stdout describing that machine — CPU, memory, disks, SMART health,
-network, RAID controller, BMC, virtualisation guests and containers.
+network, RAID controller, BMC, attached displays, UPS, virtualisation guests and
+containers.
 
 Single file. No dependencies beyond tools you already have. Nothing is installed,
 nothing is written, nothing leaves the box.
@@ -37,6 +38,8 @@ Concretely, the following are deliberately absent:
 | `perccli` / `storcli` / `megacli` write verbs | Only `show`, `-LDInfo`, `-PDList`. |
 | `ipmitool chassis power`, `sel clear`, `mc reset` | Only `mc info`, `lan print`, `sdr`, `sel list`. |
 | `modprobe` | If the IPMI modules aren't loaded, the script says so and moves on rather than loading them. |
+| `ddcutil` | The tool for talking to a monitor. But DDC/CI is bidirectional over `i2c-dev`, so "querying" a display writes to it. EDID is read from `/sys/class/drm/*/edid` instead, which also works headless. |
+| `lsusb -v` | The obvious way to find a UPS on the bus. `-v` issues USB control transfers to the device; `/sys/bus/usb/devices/*/idVendor` is the descriptor the kernel already cached. |
 | `mount` / `umount` / `mkfs` / package managers | Never. |
 | General system-info tools (`fastfetch`, `neofetch`, `inxi`) | The obvious way to cross-check the collected facts. But `fastfetch` executes `command` modules out of the host's own `config.jsonc`, so a bare call with no flags can write — and it reads the same `/proc` and sysfs files this script does, so it is a second parser, not a second source. |
 
@@ -89,6 +92,7 @@ would have been wrapped simply run unwrapped, so a hung tool can stall the run.
 | `perccli64` / `storcli64` / `megacli` | Hardware RAID array topology |
 | `zfsutils` / `btrfs-progs` | Pool and filesystem detail |
 | `docker` | Container inventory with networks and IPs |
+| `edid-decode` | Monitor vendor, model and panel serial as separate fields. Displays are detected without it — `strings` recovers the same two values unlabelled, and the connector is listed either way |
 
 Install the common ones:
 

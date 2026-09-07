@@ -20,13 +20,6 @@ adjudicated. Nothing outside this repo will notice if this list rots.
 - **C-004** (LOW) — escape `|` in Markdown table cells. Most pipe-bearing output
   already sits inside code fences.
 - **C-005** — `/etc/os-release` is sourced, which executes it as root.
-- **FR-001** — monitor detection via DRM EDID, read from
-  `/sys/class/drm/card*-*/edid`. Displays are the one category of attached
-  hardware the script cannot see, and sysfs reads work headless where `xrandr`
-  needs a session. Accepted with binding conditions.
-- **FR-002** — UPS data-connection detection. Accepted with changes, the
-  load-bearing one being that the primary signal is a sysfs read of `idVendor`
-  rather than `lsusb`, and that `/sys/class/power_supply` cannot be the gate.
 - **FR-004** — fill manufacturer/model/motherboard/BIOS from
   `/sys/devices/virtual/dmi/id/` when `dmidecode` is absent or unprivileged;
   those files are world-readable while serials are not. Today an unprivileged run
@@ -42,7 +35,9 @@ adjudicated. Nothing outside this repo will notice if this list rots.
   bookkeeping, `cap()`'s `total`, and `$(<file)`/`$EUID`/`${f##*/}` for six
   forks. Cleanup, not correctness — every site works today.
 
-**Read the ledger entry before implementing any of these FRs.** For an
+**Read the ledger entry before implementing any of these FRs.** FR-004 is the
+one left; the note below applies to it, and applied to FR-001 and FR-002 when
+they were still here. For an
 accepted-with-changes item the conditions **are** the acceptance, and the summary
 line above is deliberately not a substitute for them — an index line that
 enumerates a condition set is the long form in miniature and drifts exactly as
@@ -57,6 +52,21 @@ reasoning alone.
 
 Verified against the file and covered by `tests/run.sh` where testable.
 
+- **FR-001** — display detection from `/sys/class/drm/card*-*/edid`, with
+  `edid-decode` where installed and `strings` over the same bytes where it is
+  not. All four binding conditions are held by T15, one assertion each. The
+  stat-0 gate is the one that needed a fixture trick: a committed 128-byte file
+  has a 128-byte `stat`, so a `[ -s ]` regression passed the whole suite until
+  `card1-DP-8/edid` was made a symlink to a procfs file — the one thing
+  available that stats as 0 and still reads non-empty.
+- **FR-002** — UPS detection, sysfs `idVendor` as the primary signal, with
+  apcupsd config, `apcaccess`, UPower and `power_supply` layered on top of it.
+  T16 covers both directions, and the negative half runs under T8's stripped
+  `PATH` so it does not depend on what is installed on whoever's machine runs
+  the suite. **The `power_supply` and `apcaccess` rows are unverified against a
+  live daemon** — this host has the UPS attached with neither apcupsd nor NUT
+  installed, which is precisely why sysfs is the gate. Confirm those two rows
+  on a host running apcupsd.
 - **C-025 / C-026** — warning accumulator and meaningful exit code. The
   exit-code contract in `.claude/rules/collectors.md` is the operative statement
   of it.

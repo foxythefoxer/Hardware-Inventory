@@ -782,6 +782,138 @@ if have lspci; then
   fi
 fi
 
+# ------------------------------------------------------------- DISPLAYS ----
+# The one category of attached hardware this script could not otherwise see.
+# EDID comes straight out of sysfs, which is a plain file read: it works
+# headless and over SSH, where `xrandr` needs a session.
+#
+# `ddcutil` is deliberately not used and must not be added. DDC/CI is a
+# bidirectional protocol over i2c-dev — "querying" a monitor that way writes to
+# it, so it is a write by any reading of the rule. `edid-decode` and `strings`
+# are pure parsers of bytes handed to them on stdin: no config file, so nothing
+# on the host can turn either into an execution (the FR-003 lesson).
+#
+# Never warns, on purpose. A host with no connected display is not a broken
+# host and an LXC has no /sys/class/drm at all, so absence is the normal case —
+# same call as zpool/btrfs, and for the same reason.
+MONROWS=""
+for e in /sys/class/drm/card*-*/edid; do
+  [ -r "$e" ] || continue
+  conn=${e%/edid}; conn=${conn##*/}
+  # Writeback connectors are virtual encoders, not physical outputs — the same
+  # class of false row as the zvols a TYPE=="disk" filter alone misses (C-012).
+  case "$conn" in *-Writeback-*) continue;; esac
+  # Gate on bytes actually READ, not on file size: every edid attribute stats
+  # as 0 bytes, including the connectors that return a full 256. This is the
+  # dmidecode-banner trap again — test the thing that indicates the fact.
+  n=$(wc -c 2>/dev/null < "$e")
+  [ "${n:-0}" -gt 0 ] || continue
+  disp=""
+  if have edid-decode; then
+    disp=$("${TMO[@]}" edid-decode 2>/dev/null < "$e" | awk -F': ' '
+      /^[[:space:]]*Manufacturer:/                 && v=="" {v=$2}
+      /^[[:space:]]*Display Product Name:/         && m=="" {m=$2}
+      /^[[:space:]]*Display Product Serial Number:/&& s=="" {s=$2}
+      END {
+        gsub(/\047/,"",m); gsub(/\047/,"",s)
+        out = v
+        if (m != "") out = out " " m
+        if (s != "") out = out " (s/n " s ")"
+        print out
+      }')
+  elif have strings; then
+    # Without a parser the descriptor bytes are unlabelled, so the model and
+    # the serial cannot be told apart — both are still recovered, which is
+    # enough for inventory. The filter drops timing-block bytes that happen to
+    # be printable ("UP0 5" and friends).
+    disp=$(strings -n 4 2>/dev/null < "$e" \
+      | grep -E '^[[:alnum:]][[:alnum:] ._+/-]{5,}$' | paste -sd' ' -)
+  fi
+  # Worded for both empty cases: no parser installed, and a parser that ran and
+  # gave nothing back. The row is still emitted either way — a connector
+  # handing over 128 bytes of EDID is an attached display whether or not
+  # anything on this host could read it.
+  MONROWS="${MONROWS}| ${conn} | ${disp:-(EDID present, not parsed)} |
+"
+done
+if [ -n "$MONROWS" ]; then
+  printf '### Displays\n\n| Connector | Display |\n|---|---|\n%s\n' "$MONROWS"
+  have edid-decode || printf '_`edid-decode` is not installed — the Display column is raw EDID text, so the model and the serial are not separated._\n\n'
+fi
+
+# ------------------------------------------------------------------ UPS -----
+# Whether this host can actually talk to its UPS, which is otherwise knowable
+# only by asking someone.
+#
+# The primary signal is a direct sysfs read of each USB device's idVendor, not
+# `lsusb` — the data is already in a file, so read the file, the same move as
+# parsing emhttp's .ini instead of calling `mdcmd`. `lsusb -v` in particular is
+# out: it issues USB control transfers to the device instead of reading the
+# descriptors the kernel has already cached.
+#
+# /sys/class/power_supply is NOT the gate. Verified empty on a host with a
+# CyberPower UPS attached and claimed by usbhid; it is corroboration where it
+# is populated and useless as the test.
+#
+# Never warns, and prints nothing at all when nothing is found. Most hosts have
+# no UPS, so absence of the section is the negative answer, exactly as it is
+# for every other category of hardware here.
+UPSROWS=""
+# A whitelist of USB vendor IDs, not a protocol, and it WILL go stale: APC and
+# CyberPower are simply the two brands seen so far. Adding a third brand's ID
+# here is the intended maintenance, not a workaround.
+UPS_VENDORS="051d 0764"   # APC, CyberPower
+for f in /sys/bus/usb/devices/*/idVendor; do
+  [ -r "$f" ] || continue
+  vid=$(cat "$f" 2>/dev/null)
+  case " $UPS_VENDORS " in *" $vid "*) ;; *) continue;; esac
+  dev=${f%/idVendor}
+  # A bound interface driver is the evidence that the host can talk to it at
+  # all, as opposed to a device sitting on the bus that nothing has claimed.
+  drv=""
+  for i in "$dev"/*:*/driver; do
+    [ -e "$i" ] || continue
+    drv=$(readlink "$i" 2>/dev/null)
+    [ -n "$drv" ] && drv=", driver ${drv##*/}"
+    break
+  done
+  UPSROWS="${UPSROWS}$(kv "USB device" \
+    "$(cat "$dev/manufacturer" 2>/dev/null) $(cat "$dev/product" 2>/dev/null) ($vid:$(cat "$dev/idProduct" 2>/dev/null)$drv)")
+"
+done
+# Corroboration only — see the gate note above.
+PSUP=$(grep -lx UPS /sys/class/power_supply/*/type 2>/dev/null | sed 's#.*/\([^/]*\)/type$#\1#' | paste -sd', ' -)
+[ -n "$PSUP" ] && UPSROWS="${UPSROWS}$(kv "Kernel power_supply" "$PSUP")
+"
+# The configured intent, which is readable whether or not apcupsd is running —
+# detection must not depend on a daemon answering. Keys are whitelisted rather
+# than dumped, as everywhere else config files are read here.
+if [ -r /etc/apcupsd/apcupsd.conf ]; then
+  APCCFG=$(awk '$1=="UPSCABLE"||$1=="UPSTYPE"||$1=="DEVICE"{printf "%s%s=%s", sep, $1, $2; sep=", "}' \
+    /etc/apcupsd/apcupsd.conf 2>/dev/null)
+  [ -n "$APCCFG" ] && UPSROWS="${UPSROWS}$(kv "apcupsd config" "$APCCFG")
+"
+fi
+# `apcaccess status` is a query to apcupsd's NIS port. Load percentage and
+# battery age are out of scope; MODEL and STATUS are the two fields that answer
+# "is the data link up".
+if have apcaccess; then
+  APCS=$(tmo 10 apcaccess status 2>/dev/null \
+    | awk '/^(MODEL|STATUS)[[:space:]]*:/{sub(/[[:space:]]*:[[:space:]]*/,": "); sub(/[[:space:]]+$/,""); print}' \
+    | paste -sd'; ' -)
+  [ -n "$APCS" ] && UPSROWS="${UPSROWS}$(kv "apcaccess" "$APCS")
+"
+fi
+# A third signal, and a read. Yields little on a headless host with no session.
+if have upower; then
+  UPWR=$("${TMO[@]}" upower -e 2>/dev/null | grep -i 'ups' | paste -sd', ' -)
+  [ -n "$UPWR" ] && UPSROWS="${UPSROWS}$(kv "UPower" "$UPWR")
+"
+fi
+if [ -n "$UPSROWS" ]; then
+  printf '### UPS\n\n| Signal | Value |\n|---|---|\n%s\n' "$UPSROWS"
+fi
+
 # ------------------------------------------------------------ BMC / IPMI ---
 # Local baseboard controller (iDRAC, iLO, generic IPMI). Read-only verbs only:
 # info, print, list, sdr. Never `chassis power`, never `sel clear`, never
