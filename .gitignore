@@ -1,0 +1,20 @@
+# `.claude/` is deliberately TRACKED, not ignored.
+#
+# This repo publishes its own governance: the rules files, the hook scripts and
+# the skills under `.claude/` are the enforcement layer for the read-only rule
+# and the publishing rule, and a reader who cannot see them cannot audit them.
+# Ignoring the directory would also make the choice by accident on the first
+# `git add -A`, which is the outcome this file exists to prevent.
+#
+# The exception is anything holding private match patterns. The publishing rule
+# bars the maintainer's own name and this estate's hostnames from the repo, and
+# the leak-detection hook matches on exactly those — so its pattern list cannot
+# live in a published file. `.claude/private-patterns.example` is committed and
+# shows the format; the real list is local-only, by construction.
+.claude/*.local
+.claude/settings.local.json
+
+# A report is nothing but hostnames, serials and MACs, and the README tells you
+# to generate one with `> "$(hostname)-$(date +%F).md"`. Run that in a clone and
+# `git add -A` publishes the estate. Root level only — docs/ is dated prose.
+/*-20??-??-??.md
