@@ -1,5 +1,12 @@
 # Code Review — Summary
 
+> **Frozen — historical document, not maintained.** Written 2026-08-06 against
+> `hw-inventory.sh` at commit `bc32386` (651 lines). The file is now 990 lines, so
+> **every line number and code excerpt below is stale** and will not match `HEAD`.
+> Nothing here is edited to keep pace; it is kept as provenance for the finding IDs
+> the ledger cites. **[`docs/DISPOSITIONS.md`](../DISPOSITIONS.md) is authoritative** —
+> a finding below may have been accepted, narrowed, rejected, or superseded there.
+
     VENDOR: Anthropic
     MODEL:  Claude Opus 5
 

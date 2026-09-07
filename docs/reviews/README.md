@@ -1,17 +1,24 @@
 # Code reviews
 
-Independent reviews of `hw-inventory.sh` v4, kept here as provenance for the
-**Known limitations** table in the top-level README and to give the `F-0NN` finding
-IDs referenced there something to point at.
+Independent reviews of `hw-inventory.sh` v4, kept here as provenance: they are what the
+`C-`, `G-` and `O-` IDs in [`docs/DISPOSITIONS.md`](../DISPOSITIONS.md) point back at.
+(They were originally filed as per-reviewer `F-0NN` IDs; `86e6c05` unified them to the
+one-letter-per-reviewer scheme the ledger uses. The documents themselves still say `F-`.)
 
 ## Read this first
 
+- **Every one of these is frozen at commit `bc32386`, a 651-line script.** The file is
+  now 990 lines. Line numbers in them are stale by construction and are not corrected;
+  each file carries a header saying so. Use them to understand *why* a finding was
+  raised, never to locate code.
 - **These are AI-generated and unedited.** Three models were given the same prompt
   (`code-review-prompt-template.md`) and the script, with **zero context** about the
   target environment, the design constraints, or what had already been decided.
 - **Finding IDs are per-reviewer and do not correspond across documents.** Claude's
   F-001 is a locale issue; Grok's F-001 is brace expansion; GPT's F-001 is loop
-  iteration. Cross-reference by line number, not by ID.
+  iteration. The old advice here was to cross-reference by line number instead — that
+  stopped working when the script outgrew these documents. Cross-reference through the
+  ledger, which is what its `C-`/`G-`/`O-` prefixes exist for.
 - **Not all findings were accepted.** Several were rejected outright — including one
   recommended by two of the three reviewers that would break the script. See
   [`docs/DISPOSITIONS.md`](../DISPOSITIONS.md) before acting on anything in here.
