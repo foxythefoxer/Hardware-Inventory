@@ -8,7 +8,10 @@ The verdicts here are one line each. The reasoning behind them — measurements,
 conditions, what was checked against a real host — lives in
 [`docs/DISPOSITIONS.md`](docs/DISPOSITIONS.md) under the same IDs: `C-`/`G-`/`O-` for the
 three code reviews in `docs/reviews/`, `FR-` for a request submitted from outside the
-review cycle as a GitHub issue — see "This repo is public" below. **A new adjudication,
+review cycle as a GitHub issue — see "This repo is public" below — and `A-` for a
+whole-repo audit run against the working tree. `A-` is keyed to the channel, not to
+whichever model ran the audit, because audits repeat and a rejection filed under a
+model's name stops being findable by the next one. **A new adjudication,
 accepted or rejected, is written out there and indexed here in one line — never written
 at length in both files.** This file is loaded into every session; the ledger is opened
 when the reasoning is actually wanted, which is why the long form belongs in it.
@@ -195,6 +198,15 @@ argument are in the ledger under the same ID.
   that reads the same file is not a second opinion** — apply that to the next
   cross-check proposal (`neofetch`, `inxi`, `hwinfo`) without re-measuring. The real gap
   it surfaced is FR-004.
+- **Replacing the `TMO` array with `tmo()`** (A-004). Both are outputs of C-003,
+  introduced together; collapsing them re-opens an adjudicated design at 21 sites.
+- **One `smart_fields()` helper for the two SMART loops** (A-005). Only 3 of ~8 parses
+  are identical — the `poh` and `tmp` fallbacks read ATA and SCSI spellings on purpose.
+- **Deleting `docs/reviews/`** (A-002). The stale line numbers were real; the fix was a
+  freeze header on each file, since the `C-`/`G-`/`O-` IDs are only meaningful because
+  those documents are what they point at.
+- **Generating the `badbin` stubs from a loop** (A-006) — rejected as a priority, not as
+  an edit. It touches T3's fixture to change no behaviour.
 - **Splitting the file into `section_*()` functions** (C-031) — deferred, not rejected.
   Real improvement, but it restructures a working one-shot reporter; not worth the churn
   until `--skip` / section selection is actually wanted.
@@ -221,6 +233,14 @@ argument are in the ledger under the same ID.
   serials are not. Today an unprivileged run emits `model: null` with the value sitting
   in a readable file. Accepted with binding conditions.
 
+- **A-007** — hoist the `lsblk -P` call and derive `DISKS` from it. Deferred into C-016,
+  which changes that same path; doing them separately means the same reasoning twice.
+- **A-008** — capture `free -h` and `lscpu` once instead of re-invoking them six times
+  between them. Same shape as the `DMIMEM` capture already in the file.
+- **A-009** — micro-simplifications as one batch: the `CNAMES_TRUNCATED` bookkeeping,
+  `cap()`'s `total`, and `$(<file)`/`$EUID`/`${f##*/}` for six forks. Cleanup, not
+  correctness — every site works today.
+
 Read the ledger entry before implementing any of these FRs: for an accepted-with-changes
 item the conditions **are** the acceptance, and the summary line above is deliberately not
 a substitute for them. Each was written against a real host, and FR-004 marks the
@@ -233,6 +253,10 @@ Verified against the file and covered by `tests/run.sh` where testable.
 
 - **C-025 / C-026** — warning accumulator and meaningful exit code. The contract above is
   the operative statement of it.
+- **A-001** — the `set -u` crash on an empty container list. T12 above is the operative
+  statement of it; it is listed here so the fix is not mistaken for untested cleanup.
+- **A-003** — four duplicated documentation blocks cut to links. The rule they broke is
+  the one at the top of this file; the `head -N` count had reached three copies.
 - **C-003** — every hardcoded `timeout N` routed through the `have timeout` gate.
 - **C-012** — physical-devices table filtered on `TYPE=="disk"` *plus* a `zd[0-9]` name
   exclusion; the `TYPE` filter alone does not catch zvols, which report `TYPE=disk`.

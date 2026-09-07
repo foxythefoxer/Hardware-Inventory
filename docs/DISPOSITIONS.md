@@ -8,6 +8,12 @@ produced the verdict. Two streams share this ledger, told apart by ID prefix:
   Numbering does not correspond across those documents, which is why the prefixes exist.
 - **`FR-`** — requests submitted from outside the review cycle, filed as GitHub issues by a
   session working in a private notes vault. Open-ended; new ones land here.
+- **`A-`** — findings from a whole-repo audit run against the working tree, as opposed to a
+  review of a snapshot or a request for a feature. Open-ended, and deliberately keyed to
+  the *channel* rather than to whichever model ran it: an audit is repeatable, so the next
+  run must land in the same namespace as the last one or its rejections stop being
+  findable. This is why they are not `C-`/`G-`/`O-`, which name a reviewer identity in a
+  closed set of three.
 
 `CLAUDE.md` is loaded into every session, so it carries only the one-line verdict per ID
 and points here. This file is opened when the reasoning is actually wanted. **Write the
@@ -284,6 +290,156 @@ DMI identity is the outlier that has no fallback. Conditions:
   there are now three states rather than two: full identity, partial identity from
   sysfs, and nothing. Do not let the partial state print the "(needs root)" row *and*
   the values.
+
+---
+
+## Repository audits — `A-`
+
+Whole-repo audits for over-engineering, run against the working tree rather than a
+snapshot. The first was a `ponytail-audit` on 2026-09-06 against `5f7893d` (47 tracked
+files, a 982-line script, ~4,100 lines of docs), proposing a net −3,100 lines.
+
+Two things about that audit shape how these are adjudicated. It was **disciplined about
+the existing ledger** — it explicitly declined to re-propose C-014's named constants,
+G-003/O's `set -e`/`pipefail`, and C-031's section split, naming the evidence each was
+settled on. That is the ledger working as designed. And its single most valuable finding
+was the one it filed as *out of scope*: a real crash, found by running the script rather
+than reading it, which is the same lesson `reviews/README.md` records about the three
+static reviews. **An audit's line-count headline is the least reliable part of it.** Here
+~3,100 of the proposed 3,300 lines were documentation deletions, of which one was right,
+one was wrong, and the largest was neither — it named a real defect and the wrong remedy.
+
+### A-001 — `DNET` unbound under `set -u` on an empty container list — accepted, done
+
+Filed as out of scope, and the only thing in the audit that was actually broken.
+**Done — `f8ff695`.** A daemon answering `docker info` with zero containers is past the
+section gate and healthy, but leaves `CNAMES` empty; `DNET` was assigned only inside the
+`[ -n "$CNAMES" ]` guard and tested outside it, so `set -u` aborted the script at the
+test. Reproduced: report truncated mid-section, no footer, no `## Collection warnings`
+block, **and still exit 1**.
+
+That exit code is the severity. The C-025/C-026 contract exists so a caller can trust
+`$?`, and here a truncated report returned the same `1` as an honest incomplete
+collection — the failure mode was wearing the contract's own signal. Fixed by
+initialising `DNET` above the guard, matching `DMIMEM`.
+
+T11's docker stub always answers with 105 containers, which is why nothing caught it.
+T12 covers the empty case and was verified to fail against a reintroduced version of the
+bug (3 of 7 assertions), the control T10/T11 were held to. Generalised into `CLAUDE.md`:
+**when a tool's output gates an assignment, test the empty answer, not just the failing
+one.**
+
+### A-002 — delete `docs/reviews/` (2,965 lines) — rejected; defect fixed another way
+
+**Resolved by `1fcd35e`, which is not what was asked for.** The audit's diagnosis was
+correct: the detailed reviews are unedited AI prose whose line references point into a
+651-line script that is now 990 lines, and every actionable finding is already restated
+by ID here. Its remedy — delete, cite the commit from the ledger, let git hold the
+provenance — does not follow. The `C-`/`G-`/`O-` prefixes are only meaningful because
+those documents are what they point back at; a reader who hits `G-003` here and wants to
+know what Grok actually argued would have to know to `git log` a deleted path first.
+
+Deletion was the right response to *stale line numbers* only if the numbers were the
+value. They are not — the argument is. Each document now carries a header naming
+`bc32386` (651 lines) and the current size, saying its line numbers are stale by
+construction and that this ledger is authoritative. Historical rather than quietly wrong,
+at a cost of six headers.
+
+The folder README had rotted twice on its own and both were fixed in the same commit: it
+still described the findings as `F-0NN`, a scheme `86e6c05` renamed, and it offered
+"cross-reference by line number, not by ID" as navigation — advice that had become
+exactly backwards.
+
+### A-003 — documentation de-duplication — accepted, done
+
+**Done — `e6e2c30`, `11d582d`, `f384ca7`, `bffcac0`.** Four separate second copies, all
+drifted or drifting, all deleted in favour of a link:
+
+The README's "Fixed since that review" table restated eight entries from this file, and
+its "Deliberate non-goals" paragraph re-argued the `set -e`/`pipefail` rejections — the
+third statement of a verdict `CLAUDE.md` already bars stating twice. The drift was
+measurable: the `head -N` count was argued in three files at once, each carrying its own
+correction of the others (this file's "22 (actually 23)", the README's "23 (the review
+says 22 — off by one)", `CLAUDE.md`'s 23). `tests/README.md` listed T1–T7 for a suite
+that had reached T11. `llm-ingest.md` repeated the README's `sed`/`diff` recipe verbatim,
+a copy that fails silently — the stale one still runs, it just stops excluding what it
+was written to exclude. Two `.gitkeep` files were holding open directories that have had
+tracked content since `e0c4752`.
+
+Kept, against the audit: the README's `zpool`/`btrfs` paragraph. It reads as duplication
+but is not an adjudication record — it explains behaviour a user sees in their own
+report, which is the README's job. **The test for this class: does the second copy serve
+a different reader, or merely a different file?**
+
+### A-004 — replace the `TMO` array with `tmo()` at 21 sites — rejected
+
+`TMO=()` and `tmo N cmd...` are two spellings of one idea, and the audit is right that
+they are redundant. They are also **both outputs of C-003**, introduced together in
+`53eece7` as that fix: `TMO` for the 10s default, `tmo` for sites needing another
+duration, and the point of having both was that neither hardcodes `timeout N`. Collapsing
+them re-opens an adjudicated design across 21 call sites of a working one-shot reporter,
+which is the churn C-031 was deferred over — with less payoff, since C-031 at least
+unlocked `--skip`.
+
+No new evidence, and none of the redundancy is load-bearing: both forms already run the
+command unwrapped when `timeout` is absent, which is the entire guarantee.
+
+### A-005 — one `smart_fields()` helper for the two SMART parse blocks — rejected as stated
+
+The claim is that health/poh/ra/tmp "are parsed by near-identical programs" in the
+plain-SMART and megaraid loops, written twice. **Checked line by line, and the overlap is
+3 of roughly 8 parses.** Identical: `health`, the first `poh` probe, `ra`. Divergent *by
+design*: the `poh` fallback reads ATA's `^Power On Hours` in one and SCSI's
+`number of hours powered up` in the other; the `tmp` fallback reads `^Temperature:` versus
+`^Current Drive Temperature`. The loops also emit different columns — plain has
+`pe` and `wear`, megaraid has `mdl` and `ser`.
+
+A shared helper would have to emit the superset and carry both fallback sets, i.e.
+re-introduce the divergence inside itself. The duplication is two device classes that
+genuinely answer differently, not one program typed twice. **Not re-open without a
+measurement showing the fallbacks are interchangeable** — they are not, and that is the
+whole finding.
+
+### A-006 — generate the 19 `badbin` stubs from a loop in `run.sh` — rejected as a priority
+
+Correct that the stubs are near-identical and that their messages are asserted on
+nowhere. Rejected on where it lands: `badbin` is T3's fixture, the test `CLAUDE.md` marks
+as the one that must not be weakened for speed, and every real bug in this project's
+history has been the class T3 catches. Trading 19 inert files for generated ones touches
+the load-bearing test to change no behaviour. Harmless in isolation; not worth doing on
+its own. Bundle it with a change that already has reason to be in `run.sh`.
+
+### A-007 — hoist the `lsblk -P` call and derive `DISKS` from it — deferred
+
+Real: two `lsblk` invocations with equivalent exclusion filters, and the `-P` form
+already carries everything `DISKS` needs. Deferred because it collides with **C-016**,
+which is open and changes exactly this path — the megaraid probe picks its target by
+walking `DISKS`, and C-016 is the finding that this picks the USB boot device on Unraid.
+Refactoring the producer while its one problematic consumer is queued for change means
+doing the same reasoning twice. **Do it as part of C-016 or not at all.**
+
+### A-008 — capture `free -h` and `lscpu` once instead of re-invoking — accepted
+
+Four `free -h` and two `lscpu` invocations, each re-parsed from scratch. Straightforward,
+and the precedent is in the file: `DMIMEM` is captured once for exactly this reason, with
+a comment saying the three parses that follow used to re-run `dmidecode` each. Same shape,
+same fix. Not urgent — this is a one-shot reporter and the cost is a few forks, not a
+hot loop. Queued in `CLAUDE.md`.
+
+### A-009 — micro-simplifications, as one batch — accepted, low priority
+
+Three proposals of one shape, worth doing together or not at all:
+
+- `CNAMES_TRUNCATED` currently uses four variables and a `wc -l` to learn whether `head`
+  cut anything. `[ "$CNAMES" = "$CNAMES_ALL" ] || CNAMES_TRUNCATED=1` is equivalent —
+  command substitution strips trailing newlines from both sides, so below the limit the
+  two are byte-identical and above it one is a strict prefix. Verified by reading, not
+  yet by running; T11 and T12 both cover this block.
+- `cap()`'s `total` can be tested inline.
+- `$(cat /sys/…)` ×6 → `$(<file)`, `$(id -u)` → `$EUID`, `basename "$f" .cfg` →
+  `${f##*/}`. Bash-only, which line 1 already declares — the same argument G-001 settled.
+
+Accepted as cleanup, explicitly **not** as correctness. Each site works today.
 
 ---
 
