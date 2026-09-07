@@ -105,11 +105,11 @@ SYSTEMD_FAILED_LINES=20      # `systemctl --failed`.
 # what's attached to the incoming pipe, so it closes its read end after N+1
 # lines exactly like a bare `head -N` would, and a slow upstream producer
 # (smartctl, ipmitool, perccli) still gets SIGPIPE and exits promptly. The
-# `set -o pipefail` rejection in CLAUDE.md rests on that early-close behaviour
-# continuing to hold; a manual read loop would not preserve it.
+# `set -o pipefail` rejection in .claude/rules/ rests on that early-close
+# behaviour continuing to hold; a manual read loop would not preserve it.
 #
 # Zero lines in -> zero lines out, marker included: sections are captured to
-# a variable and printed only if non-empty (see Conventions in CLAUDE.md),
+# a variable and printed only if non-empty (Conventions, .claude/rules/),
 # and a marker on empty input would defeat that at every call site at once —
 # a host with no RAID controller would grow a "truncated" note where nothing
 # should print at all.

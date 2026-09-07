@@ -15,10 +15,14 @@ produced the verdict. Two streams share this ledger, told apart by ID prefix:
   findable. This is why they are not `C-`/`G-`/`O-`, which name a reviewer identity in a
   closed set of three.
 
-`CLAUDE.md` is loaded into every session, so it carries only the one-line verdict per ID
-and points here. This file is opened when the reasoning is actually wanted. **Write the
-full adjudication here, then the index line there — never the paragraph in both places.**
-That duplication is what this split exists to stop.
+The instruction files carry only the one-line verdict per ID and point here; this file is
+opened when the reasoning is actually wanted. **Write the full adjudication here, then the
+index line there — never the paragraph in both places.** That duplication is what this
+split exists to stop. The index line goes to [`QUEUE.md`](QUEUE.md) if accepted and
+outstanding, or to `.claude/rules/collectors.md` if rejected; `/adjudicate` is the
+procedure. Entries below that cite `CLAUDE.md` predate that split and are left as written,
+the same way `reviews/` keeps its stale line numbers — they are a record of what was
+argued, not a pointer to follow.
 
 Claims marked **verified** were checked against the actual file rather than taken on
 trust.

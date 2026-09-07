@@ -279,12 +279,18 @@ facts every working host has.
 ```
 hw-inventory.sh      the script
 README.md            this file
-CLAUDE.md            maintainer decisions, read by Claude Code at session start
+CLAUDE.md            the two rules that govern everything, read at session start
 tests/run.sh         the test suite — bash tests/run.sh
 tests/fixtures/      failing/hanging tool stubs, Unraid, Proxmox and cmdline mocks
 docs/DISPOSITIONS.md accept/reject/defer ledger — every adjudicated proposal, with reasons
+docs/QUEUE.md        accepted work not yet done, and what is already done
 docs/reviews/        independent code reviews and the prompt used to generate them
 docs/prompts/        prompts for ingesting output into an Obsidian vault
+.claude/rules/       conventions, the exit-code contract and rejected proposals
+.claude/hooks/       enforcement — banned verbs, and estate identity in writes and commits
+.claude/skills/      /adjudicate (record a verdict) and /hw-check (verify a change)
+.githooks/           pre-commit and commit-msg wrappers around the same leak scanner
+.github/workflows/   CI: the suite on every push, unprivileged and as root
 ```
 
 ---
@@ -303,11 +309,25 @@ Two rules, both non-negotiable:
    either direction is the bug: warn too eagerly and every minimal host looks broken,
    warn too little and an empty section reads as fact.
 
+Set up a fresh clone once. Neither step is automatic, and the second one is not
+optional — the leak hook refuses to run without its pattern list rather than
+running inertly, because a hook that quietly does nothing looks exactly like a
+hook that works:
+
+```bash
+git config core.hooksPath .githooks                                 # pre-commit + commit-msg
+cp .claude/private-patterns.example .claude/private-patterns.local  # then fill it in
+```
+
 Before opening a PR:
 
 ```bash
 bash tests/run.sh      # all tests must pass; add one for what you changed
 ```
+
+CI runs the same suite on every push and pull request, unprivileged and again as
+root — the root pass is the only place the megaraid drive probe is exercised, and
+the runner is the only place ShellCheck is guaranteed present.
 
 The suite makes every external tool fail or hang and confirms the script still completes,
 reaches its footer, and exits `1` rather than `124`. Bugs in this project have

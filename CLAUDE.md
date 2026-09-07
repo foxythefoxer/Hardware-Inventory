@@ -1,28 +1,31 @@
 # Maintainer notes for `hw-inventory.sh`
+<!--
+This file is loaded into EVERY session. It was 362 lines; most of that was
+justification for rules rather than the rules themselves, paid for on every
+session including the ones that never touch the script — of the last 34 commits,
+18 touched no code at all.
 
-Read this before proposing any change. It states the rules this script is built on and
-the verdict on every proposal already adjudicated, so they don't get relitigated each
-session.
+Two things carry the bulk now, and neither loses anything:
 
-The verdicts here are one line each. The reasoning behind them — measurements, binding
-conditions, what was checked against a real host — lives in
-[`docs/DISPOSITIONS.md`](docs/DISPOSITIONS.md) under the same IDs: `C-`/`G-`/`O-` for the
-three code reviews in `docs/reviews/`, `FR-` for a request submitted from outside the
-review cycle as a GitHub issue — see "This repo is public" below — and `A-` for a
-whole-repo audit run against the working tree. `A-` is keyed to the channel, not to
-whichever model ran the audit, because audits repeat and a rejection filed under a
-model's name stops being findable by the next one. **A new adjudication,
-accepted or rejected, is written out there and indexed here in one line — never written
-at length in both files.** This file is loaded into every session; the ledger is opened
-when the reasoning is actually wanted, which is why the long form belongs in it.
+  - HTML comments like this one are stripped before any of this reaches the
+    model's context, and stay visible when a human opens the file. Verified by
+    test, 2026-09-06. Reasoning and provenance are therefore free here, and
+    belong here rather than in prose.
 
-**An index line never enumerates a numbered condition set.** "Accepted with four binding
-conditions (a; b; c; d)" is the long form in miniature, and it drifts exactly as the long
-form would: the FR-001 line here silently swapped one of the ledger's four conditions for
-a sentence from its preamble, and the FR-004 line said "four" where the ledger lists five,
-dropping the one an implementer most needs. Both survived until a reader compared the two
-files by hand, which is not a control. State the verdict and the single fact that settles
-it; the conditions live in the ledger.
+  - `.claude/rules/collectors.md` carries `paths:` frontmatter, so it loads when
+    hw-inventory.sh, tests/ or the ledger is read rather than at launch.
+    Verified on this machine, 2026-09-07, Claude Code 2.1.263, with an unscoped
+    rules file as the control.
+
+WHAT STAYED, and the test for it: a rule stays here if it must hold before any
+file is opened, or if no hook can check it. The read-only principle generalises
+to cases the ban list does not name. The config clause is the part a matcher
+cannot see — it is what caught fastfetch. The publishing principle covers issue
+replies and judgment about topology, which no shape-matcher sees.
+
+Nothing was deleted. Everything below points at where it went.
+-->
+Read this before proposing any change. Two rules govern everything here; the table at the bottom routes the rest.
 
 ---
 
@@ -31,332 +34,101 @@ it; the conditions live in the ledger.
 **This script is read-only. Every command must be a query.**
 
 Not "read-only by default." Not "read-only unless the user asks." A change that
-introduces a write is rejected regardless of how useful the data would be.
+introduces a write is rejected regardless of how useful the data would be. If a
+feature appears to require a write, the answer is to find the read-only path or
+to leave the data uncollected.
 
-If a feature appears to require a write, the answer is to find the read-only path or to
-leave the data uncollected. The worked example is Unraid array state: `mdcmd status` is
-the obvious call, but it works by writing a command string into `/proc/mdcmd`, so the
-script parses emhttp's `.ini` files instead. Same data, no write.
+This is the design's whole point, not a safety property incidental to it: the
+script was built read-only from the start so it could eventually run unattended —
+a cron job, a scheduled sweep — without a human confirming each run against
+production hosts first. A write-capable script would need that human in the loop
+every time; this one doesn't, by construction. **A change that introduces a write
+doesn't just add risk, it breaks the reason the script can be automated at all.**
+<!-- The worked example, kept for a human: Unraid array state. `mdcmd status` is
+     the obvious call, but it works by writing a command string into
+     /proc/mdcmd, so the script parses emhttp's .ini files instead. Same data,
+     no write. That is the shape of every correct answer here. -->
+**The ban covers the tool's config, not just its verb.** A banned-verb list can
+only describe commands this script writes; it cannot see a tool whose behaviour
+is defined by a file on the host. Before adding any dependency, ask what it reads
+at startup and whether that can execute. A flag that suppresses it is not
+sufficient on its own: it moves the read-only guarantee from this script's source
+into a third party's release notes.
+<!-- Measured, and the reason that clause exists: `fastfetch` auto-loads
+     config.jsonc from five search paths — /etc/fastfetch/ among them — and its
+     `command` module runs an arbitrary shell string. A bare `fastfetch` with no
+     flags created a file on this host, and would do it as root under the
+     documented sudo invocation (FR-003). `-c none` does close it, which is
+     precisely why the flag is not enough: the guarantee moves off-repo.
 
-This is the design's whole point, not just a safety property incidental to it: the
-script was built read-only from the start so it could eventually run unattended — a
-cron job, a scheduled sweep — without a human confirming each run against production
-hosts first. A write-capable script would need that human in the loop every time; this
-one doesn't, by construction. Any change that introduces a write doesn't just add risk,
-it breaks the reason the script can be automated at all.
-
-Banned regardless of context: `smartctl -t`, `mdcmd`, `zpool scrub/import/export/create`,
-`btrfs balance/scrub/device`, `docker run/exec/rm/pull`, `pct`/`qm` start/stop/set/destroy,
-`modprobe`, `mount`/`umount`, any package manager, any write verb on `perccli`/`storcli`/
-`megacli`, `ipmitool chassis`/`sel clear`/`mc reset`/`raw`, and `ddcutil` — DDC/CI is a
-bidirectional protocol over `i2c-dev`, so querying a monitor with it writes to the
-monitor. That last one is why FR-001 reads EDID out of sysfs instead.
-
-**The ban covers the tool's config, not just its verb.** A banned-verb list can only
-describe commands this script writes; it cannot see a tool whose behaviour is defined by
-a file on the host. Worked example, measured: `fastfetch` auto-loads `config.jsonc` from
-five search paths — `/etc/fastfetch/` among them — and its `command` module runs an
-arbitrary shell string, so a bare `fastfetch` with no flags created a file on this host,
-and would do it as root under the documented `sudo` invocation (FR-003). Before adding
-any dependency, ask what it reads at startup and whether that can execute. A flag that
-suppresses it (`-c none` does) is not sufficient on its own: it moves the read-only
-guarantee from this script's source into a third party's release notes.
-
-When adding a vendor CLI, allow only `show`-class verbs and say so in a comment.
+     This clause is the half no hook can enforce. `.claude/hooks/no-write-verbs.sh`
+     matches verbs in command position; it cannot read a third party's config
+     loader. Do not treat the hook as a replacement for this paragraph. -->
+The banned verbs themselves are enforced rather than recited: by
+`.claude/hooks/no-write-verbs.sh` in a session, and by T1 against the script on
+every CI run.
+<!-- `ddcutil` is on that list for a reason worth keeping: DDC/CI is
+     bidirectional over i2c-dev, so *querying* a monitor writes to it. That is
+     why FR-001 reads EDID out of sysfs instead. -->
 
 ---
 
 ## This repo is public; its inputs are not
 
-`foxythefoxer/Hardware-Inventory` is a public GitHub repository. Everything committed here
-is published — this file, the ledger, the fixtures, the commit messages.
+`foxythefoxer/Hardware-Inventory` is a public GitHub repository. Everything
+committed is published — this file, the ledger, the fixtures, the commit
+messages, and the replies posted to issues.
 
-Some of the work that lands here originates elsewhere: feature requests arrive as GitHub
-issues filed by a session working in a private notes vault that documents a real homelab
-(FR-003 was issue #1), and dispositions get argued from measurements taken on real hosts
-in that estate. **That session has rules keeping estate detail inside the vault. This one
-is the receiving end, and had none — hence this section.**
+**Never commit estate identity.** No hostnames, IP or MAC addresses, network
+topology, tailnet addresses, real names or email addresses. This is not a secrets
+rule; serials, MACs and IPs are precisely what the script exists to *emit*. It is
+a publishing rule, and the distinction is where the data lands: writing a host's
+identity into a report on the operator's own disk is the product, committing it
+here is disclosure. **"Real names" includes the maintainer's own** — say
+`foxythefoxer`, a handle already public by construction.
 
-**Never commit estate identity.** No hostnames, IP addresses, MAC addresses, network
-topology, tailnet addresses, real names or email addresses — not in this file, not in the
-ledger, not in test fixtures, not in commit messages. This is not a secrets rule; serials,
-MACs and IPs are precisely what the script exists to *emit*, and Conventions below says so.
-It is a publishing rule, and the distinction is where the data lands: writing a host's
-identity into a report on the operator's own disk is the product, committing it here is
-disclosure.
+The test that settles the cases in between: **`hw-inventory.sh` is generic and
+belongs here; its reports are nothing but hostnames, serials and MACs, and never
+do.** Never commit a sample report or paste one into a review or a fixture.
+Identify a host by class — "a Proxmox LXC", "a whitebox AM5 desktop". Keep the
+measurement, drop the machine.
 
-**"Real names" includes the maintainer's own**, which is the one that slips through,
-because it looks like ordinary attribution rather than data. Say `foxythefoxer` — a GitHub
-handle is already public by construction, and it is the identity this repo is published
-under. The personal name behind it appears nowhere: not in a file, a commit message, a
-commit trailer, or an issue comment. A private notes vault addressing its owner by first
-name is correct there and wrong the moment the sentence is copied out.
+`.claude/hooks/no-estate-identity.sh` blocks the *shapes* on writes, commits and
+commit messages. **It is not a substitute for this section:** no matcher sees a
+description of topology, a named private vault, or a name it was never told.
+<!-- Provenance, for a human: requests arrive as issues filed by a session
+     working in a private notes vault documenting a real homelab (FR-003 was
+     issue #1), and dispositions get argued from measurements taken on real
+     hosts. That session has rules keeping estate detail inside the vault. This
+     one is the receiving end, and had none — hence this section.
 
-The test that settles the cases in between: **`hw-inventory.sh` is generic and belongs
-here; its reports are nothing but hostnames, serials and MACs, and never do.** Do not
-commit a sample report, and do not paste one into a review, a disposition, or a fixture.
+     Fixtures use the documentation ranges: RFC 5737 for addresses, RFC 7042
+     00:00:5E:00:53:00–FF for MACs. Never a private-range address or a real OUI —
+     a reader cannot tell those from a live one, and neither can a scanner. T9's
+     iSCSI fixture carried a live address until 2026-09-05, which is what that
+     rule exists to prevent, and two commits in this history exist only to repair
+     leaks of exactly this kind.
 
-**Evidence in the ledger names the measurement, not the machine.** An adjudication is only
-auditable if it says what was actually checked, so keep the byte counts, file modes,
-timings and hardware models that carry the argument — a `VX2768-2KP` on DP-1 is a panel
-anyone can buy. A hostname is a machine on someone's LAN, and one had been sitting in
-FR-003 since it was written. Where a claim needs its host identified at all, identify it by
-class: "a Proxmox LXC", "a whitebox AM5 desktop", "the Unraid box".
-
-**Fixtures use the documentation ranges** — RFC 5737 `192.0.2.0/24`, `198.51.100.0/24`,
-`203.0.113.0/24` for addresses, RFC 7042 `00:00:5E:00:53:00`–`FF` for MACs. Never an
-RFC 1918 address or a real OUI: a reader cannot tell those apart from a live one, and
-neither can a scanner. T9's iSCSI fixture carried a live address from that estate until
-2026-09-05, which is what this rule exists to prevent.
-
-**The issue tracker is part of that public surface, and the replies are yours.** Requests
-arrive as issues; adjudications get posted back as issue comments. Both are world-readable,
-and the verdict comment is written by *this* session — a leak there is this session's to
-make, not the filer's. Everything above applies to issue text unchanged, plus one thing
-files don't tempt you into: **do not name the private vault or any of its notes.** The
-filing agent and its own brief may be named — those identify an agent, not an estate — but
-the vault's name and its filenames carry its internal structure, and a citation like
-"per `some-decisions-note.md`, 2026-09-05 entry" is a provenance habit that reads as
-courtesy inside the vault and as disclosure outside it. A verdict comment quotes the
-measurement, not the machine, exactly as the ledger does. And write it right the first
-time: editing an issue afterwards does not reliably remove anything, since GitHub keeps the
-prior revision in the edit history.
-
-**Requests arrive; nothing tracks them home.** The filing session records that a request
-was submitted and what the verdict was, then stops by design — it does not track whether
-this repo implemented anything, and it deletes accepted items from its own backlog once
-adjudicated. The "Agreed work queue" below is therefore the *only* record that an accepted
-FR is still outstanding. Nothing outside this repo will notice if it rots.
-
+     The name rule is the one that slips through, because it looks like ordinary
+     attribution rather than data. A private vault addressing its owner by first
+     name is correct there and wrong the moment the sentence is copied out. -->
 ---
 
-## The exit-code contract
+## Where everything else lives
 
-Since C-025/C-026 the script exits `0` when collection is complete and `1` when it is
-not, having written the report in full either way and ended it with a
-`## Collection warnings` block naming what failed. Callers may rely on this.
+| What | Where | Loaded when |
+|---|---|---|
+| Exit-code contract · Conventions · Rejected proposals · Testing | [`.claude/rules/collectors.md`](.claude/rules/collectors.md) | `hw-inventory.sh`, `tests/**` or the ledger is read |
+| Accepted work not yet done, and what's already done | [`docs/QUEUE.md`](docs/QUEUE.md) | You open it |
+| Every verdict, with its measurements | [`docs/DISPOSITIONS.md`](docs/DISPOSITIONS.md) | You open it |
+| Recording a new verdict, and replying to the issue | `/adjudicate` | You invoke it |
+| Verifying a change before committing | `/hw-check` | You invoke it |
+| The banned-verb list · leak shapes | `.claude/hooks/` | Every matching tool call, and `git commit` |
 
-**The judgment call, which is the whole feature:** a warning means the tool was
-**present, permitted, and still returned nothing.** Silence is for things a host
-genuinely lacks.
+**`docs/QUEUE.md` is the only record that an accepted request is still
+outstanding.** The filing session stops at submission by design and deletes
+accepted items from its own backlog once adjudicated, so nothing outside this
+repo will notice if that queue rots.
 
-- Tool not installed → silent. A minimal host is not a broken one.
-- Tool needs root and the run is unprivileged → silent. The header already says so.
-- Tool present, permitted, no output → `warn`.
-
-Judgments already made here, with the reasoning, so they don't get relitigated:
-
-- **`zpool` and `btrfs` never warn.** `zfsutils` and `btrfs-progs` are routinely
-  installed as dependencies on hosts that use neither filesystem, where an empty listing
-  is the correct answer. A warning there would fire on ordinary ext4 machines and train
-  readers to skip the section. `df`, `findmnt`, `lsblk`, `lscpu` and `ip` *do* warn —
-  they describe facts every working host has. Both sites carry a comment saying so.
-- **`pvecm` never warns.** `pvecm status` fails on a standalone node that was never
-  joined to a cluster, which is a normal Proxmox install.
-- **`docker info` failing is the section gate, not a warning.** Installed docker with a
-  stopped daemon, or a user outside the `docker` group, is legitimate.
-- **An empty `systemctl --failed`, zero containers and zero VMs are healthy**, not
-  warnings. Where a tool prints a header even with nothing to report (`pct list`,
-  `qm list`), test the raw output for emptiness rather than the parsed row count.
-- **Test the thing that actually indicates failure, not just emptiness.** `dmidecode -t
-  memory` prints a banner to stdout even when it cannot read `/dev/mem`, so that check
-  keys off the `Memory Device` record count. An emptiness test there never fires.
-
-`warn` **must only be called from the main shell.** Pipeline bodies and command
-substitutions are subshells and their mutations are lost (G-002) — this is no longer a
-theoretical fragility now that a global accumulator exists. The storage and network row
-loops capture their pipeline into a variable and test it outside; follow that pattern.
-
----
-
-## Rejected proposals — do not re-suggest
-
-Evaluated and declined. Reopening one requires new evidence, not a fresh opinion. Below
-is the verdict and the single fact that settles it; the measurements and the full
-argument are in the ledger under the same ID.
-
-- **`set -o pipefail`** (G-003, O). Would break the script. 23 pipelines end in
-  `head -N`, which exits early and SIGPIPEs upstream: measured exit `141` with it, `0`
-  without. Also incompatible with the exit-code contract above — you cannot have both a
-  meaningful exit code and a `pipefail` that reports failure on every successful
-  pipeline.
-- **`set -e` / `set -eE`** (O). This is a best-effort collector and most commands are
-  *expected* to fail (`dmidecode` unprivileged, `zpool` off ZFS, `pct` off Proxmox), so
-  it truncates the report at the first absent tool. `have` / `$TMO` / `|| true` handle
-  those explicitly. `set -u` alone is deliberate.
-- **Removing brace expansion `{0..31}`** (G-001). Line 1 declares `bash`; numeric ranges
-  have worked since bash 3.0 (2004). `seq` would add a coreutils dependency to remove a
-  bash dependency from a bash script.
-- **Converting whitespace-split lists to arrays** (O-001) — rejected as a *priority*, not
-  as an edit. Device names from `lsblk` and VMIDs from `pct list` are whitespace-free by
-  construction. Harmless to do; not a correctness fix, and not to be sold as one.
-- **A `fastfetch` cross-check** (FR-003, issue #1). Two facts settle it. It breaks the
-  read-only rule invisibly — a bare `fastfetch` executes `command` modules out of the
-  host's `config.jsonc`, verified by watching it create a file. And it is not a second
-  source: its `MemTotal` is byte-identical to `/proc/meminfo`, its OS fields come from
-  `/etc/os-release`, its model from the same SMBIOS table `dmidecode` decodes. **A tool
-  that reads the same file is not a second opinion** — apply that to the next
-  cross-check proposal (`neofetch`, `inxi`, `hwinfo`) without re-measuring. The real gap
-  it surfaced is FR-004.
-- **Replacing the `TMO` array with `tmo()`** (A-004). Both are outputs of C-003,
-  introduced together; collapsing them re-opens an adjudicated design at 21 sites.
-- **One `smart_fields()` helper for the two SMART loops** (A-005). Only 3 of ~8 parses
-  are identical — the `poh` and `tmp` fallbacks read ATA and SCSI spellings on purpose.
-- **Deleting `docs/reviews/`** (A-002). The stale line numbers were real; the fix was a
-  freeze header on each file, since the `C-`/`G-`/`O-` IDs are only meaningful because
-  those documents are what they point at.
-- **Generating the `badbin` stubs from a loop** (A-006) — rejected as a priority, not as
-  an edit. It touches T3's fixture to change no behaviour.
-- **Splitting the file into `section_*()` functions** (C-031) — deferred, not rejected.
-  Real improvement, but it restructures a working one-shot reporter; not worth the churn
-  until `--skip` / section selection is actually wanted.
-
----
-
-## Agreed work queue
-
-### Remaining
-
-- **C-016** — the megaraid probe targets the first non-NVMe disk, which on Unraid is
-  often the USB boot device.
-- **C-004** (LOW) — escape `|` in Markdown table cells. Most pipe-bearing output already
-  sits inside code fences.
-- **C-005** — `/etc/os-release` is sourced, which executes it as root.
-- **FR-001** — monitor detection via DRM EDID, read from `/sys/class/drm/card*-*/edid`.
-  Displays are the one category of attached hardware the script cannot see, and sysfs
-  reads work headless where `xrandr` needs a session. Accepted with binding conditions.
-- **FR-002** — UPS data-connection detection. Accepted with changes, the load-bearing one
-  being that the primary signal is a sysfs read of `idVendor` rather than `lsusb`, and
-  that `/sys/class/power_supply` cannot be the gate.
-- **FR-004** — fill manufacturer/model/motherboard/BIOS from `/sys/devices/virtual/dmi/id/`
-  when `dmidecode` is absent or unprivileged; those files are world-readable while
-  serials are not. Today an unprivileged run emits `model: null` with the value sitting
-  in a readable file. Accepted with binding conditions.
-
-- **A-007** — hoist the `lsblk -P` call and derive `DISKS` from it. Deferred into C-016,
-  which changes that same path; doing them separately means the same reasoning twice.
-- **A-008** — capture `free -h` and `lscpu` once instead of re-invoking them six times
-  between them. Same shape as the `DMIMEM` capture already in the file.
-- **A-009** — micro-simplifications as one batch: the `CNAMES_TRUNCATED` bookkeeping,
-  `cap()`'s `total`, and `$(<file)`/`$EUID`/`${f##*/}` for six forks. Cleanup, not
-  correctness — every site works today.
-
-Read the ledger entry before implementing any of these FRs: for an accepted-with-changes
-item the conditions **are** the acceptance, and the summary line above is deliberately not
-a substitute for them. Each was written against a real host, and FR-004 marks the
-conditions that could not be verified here — confirm those on a Proxmox LXC and a whitebox
-board rather than shipping them on reasoning alone.
-
-### Done — do not re-implement
-
-Verified against the file and covered by `tests/run.sh` where testable.
-
-- **C-025 / C-026** — warning accumulator and meaningful exit code. The contract above is
-  the operative statement of it.
-- **A-001** — the `set -u` crash on an empty container list. T12 above is the operative
-  statement of it; it is listed here so the fix is not mistaken for untested cleanup.
-- **A-003** — four duplicated documentation blocks cut to links. The rule they broke is
-  the one at the top of this file; the `head -N` count had reached three copies.
-- **C-003** — every hardcoded `timeout N` routed through the `have timeout` gate.
-- **C-012** — physical-devices table filtered on `TYPE=="disk"` *plus* a `zd[0-9]` name
-  exclusion; the `TYPE` filter alone does not catch zvols, which report `TYPE=disk`.
-  Still unverified against real zvols — confirm on a `local-zfs` host.
-- **C-014** — named constants for every `head -N` limit, consumed through `cap()`. The
-  rules that came out of it are under Conventions below; T10/T11 cover them.
-- **C-009** — `/proc/cmdline` redacted by parameter **name** and by **value**, the latter
-  for credentials embedded in dracut's `netroot=iscsi:user:pass:...@host` form where the
-  name gives nothing away. Covered by T9. The name pass alone missed the embedded form
-  for two commits: if you add another redaction, ask first whether the secret can hide in
-  a value.
-- **C-020** `racadm` root-gated under its own `###` heading · **C-023** one
-  `docker inspect` over all containers instead of N+1 · **C-011** DIMM rows emitted at
-  the record boundary · **C-001** `export LC_ALL=C` after `set -u`.
-
----
-
-## Testing requirements
-
-**Errors are already handled; hangs are the real risk.** Every genuine bug found in this
-project so far has been a hang, not an error — three static code reviews missed the one
-real defect because none of them ran the script.
-
-Before any PR: **`bash tests/run.sh`, all passing**, plus a new case for what you
-changed. The suite now covers what this section used to ask for by hand:
-
-1. **T3 hostile.** Stubs on `PATH` that exit non-zero, one that `sleep`s. The script
-   must complete, reach its footer, and exit `1` — `124` means it hung, which is the
-   defect class this test exists for. Do not delete it to make the suite faster.
-2. **T2 clean.** Zero stderr, no empty table headers, valid YAML frontmatter, exit `0`.
-3. **T4/T5/T6 mock fixtures** for hardware you don't have: Unraid `disks.ini`/`var.ini`,
-   `pct`/`qm` config output, and a `smartctl` answering on sparse `megaraid,N` IDs.
-4. **T8 warning contract.** Both halves: a present-and-failing tool exits `1` and is
-   named; a `PATH` where the tools are merely absent still exits `0` and warns about
-   nothing. The second half is the one that catches over-eager warnings.
-5. **T9 cmdline redaction.** Also both halves: secrets and CHAP usernames gone, and the
-   target name, initiator and `rd.iscsi.firmware` still present. Over-redaction is a real
-   failure too — a command line scrubbed of its target is no longer useful as inventory.
-6. **T10/T11 output caps.** T10 is the general case: a stub over a limit gets the
-   `--- truncated ---` marker and nothing past it; a stub under the limit is
-   byte-for-byte what a bare `head -N` would have produced, marker included (i.e. not
-   included) — this second half is what catches a marker leaking onto an untruncated,
-   otherwise-empty-should-stay-empty section. T11 is the CNAMES edge case specifically:
-   a marker must never reach `docker inspect`'s argument list, and must land after the
-   container-networks table, not inside it. Both were run against deliberately
-   reintroduced versions of the bugs they guard against, to confirm they actually fail
-   without the fix — a stderr-based first draft of T11 did not, since the script
-   correctly runs `docker inspect` under `2>/dev/null` and the test was checking a
-   channel the script itself discards.
-7. **T12 the empty-collection case.** A `docker info` that answers with zero
-   containers is past the section gate and healthy, so it must reach the footer and
-   exit `0`. It did neither: `DNET` was assigned only inside the `[ -n "$CNAMES" ]`
-   guard and tested outside it, so `set -u` killed the script mid-section — no footer,
-   no warnings block, and still exit `1`, which a caller cannot tell from an honest
-   incomplete collection. T11's stub always answers with 105 containers, which is why
-   nothing caught it. **When a tool's output gates an assignment, test the empty
-   answer, not just the failing one** — the pattern to copy is `DMIMEM=""` initialised
-   above its own root gate.
-8. `bash -n` (T1) and ShellCheck (T7, skipped when not installed). Baseline was **zero
-   errors, zero warnings** on the default ruleset (24 findings, all severity `note`; the
-   `SC2016` hits are false positives from single-quoted awk programs). Do not regress
-   this — and note it **still** has not been re-verified since the C-025/C-026 work:
-   ShellCheck requires `sudo pacman -S shellcheck` on this host and sudo needs an
-   interactive password that isn't available to an agent session. Install it by hand and
-   run T7 before trusting the baseline.
-
-Some paths are still only reachable as root (`dmidecode`, SMART, `pct`/`qm`, IPMI).
-Where sudo isn't available, simulating `is_root() { true; }` against a copy exercises
-the branches; it found the `dmidecode` banner problem noted above. Run the suite with
-`sudo bash tests/run.sh` when you can — T6's drive probe skips otherwise.
-
----
-
-## Conventions
-
-- Comments explain **why**, not what. The `lsblk -P` comment exists specifically so a
-  future maintainer doesn't "simplify" it back into a column-shift bug. Keep that habit.
-- Guard every external tool with `have`, a timeout, and `2>/dev/null`. The timeout is
-  `"${TMO[@]}"`, or `tmo N cmd...` where the 10s default is wrong; both run the command
-  unwrapped when `timeout` is absent, which is the entire point of the gate (C-003).
-  Never hardcode `timeout N` — that bypasses it.
-- Whitelist keys when parsing config files rather than dumping them. Unraid's `var.ini`
-  contains a `csrf_token`; `ipmitool lan print` contains an SNMP community string. Both
-  are filtered deliberately — extend that policy, don't work around it.
-- Serials, MACs and IPs **are** emitted on purpose; that's the point of an inventory.
-  Secrets are not. The line is "identifying" vs "authenticating." Worked example: an
-  iSCSI CHAP **username** is redacted, because it is half of a credential pair rather
-  than a name for a thing — while the target IQN, host and port beside it are kept. When
-  a value is arguably both, ask which side it is doing work on.
-- Section output is captured to a variable and printed only if non-empty, so absent
-  hardware never leaves a bare table header. Row loops that are pipeline bodies must be
-  captured too — both to keep that property and because `warn` cannot run inside one.
-- Warning text names the tool and says what is missing as a result, so a reader who
-  never opens the script can act on it. "`lsblk` is installed but listed no block
-  devices — the storage and SMART sections are empty as a result", not "lsblk failed".
-- A `head -N` that can genuinely truncate real output goes through `cap()` with a named
-  constant, not a bare number — see the constants block near the top. `cap()` is not
-  `warn()`: truncation is real data arriving incomplete, not a collector failing, and it
-  never touches `WARNCOUNT` or the exit code. Before piping something through `cap()`,
-  check whether its output is later word-split into another command's arguments (as
-  `CNAMES` is, into `docker inspect`'s) — an inline marker there becomes a bogus argument
-  instead of a footnote. That site reads the full list, caps it with plain `head`, and
-  defers its marker to after the block instead.
+A fresh clone needs two one-time steps before the git-side hooks do anything —
+see **Contributing** in the README.
