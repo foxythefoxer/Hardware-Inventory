@@ -35,11 +35,13 @@ on:
     paths:
       - 'hw-inventory.sh'
       - 'tests/**'
+      - '.claude/hooks/**'
       - '.github/workflows/tests.yml'
   pull_request:
     paths:
       - 'hw-inventory.sh'
       - 'tests/**'
+      - '.claude/hooks/**'
       - '.github/workflows/tests.yml'
   workflow_dispatch:
 

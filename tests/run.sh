@@ -385,6 +385,63 @@ grep -q 'INSPECT-CALLED-WITH-NO-CONTAINERS' "$TMP/ed.md" \
 grep -q 'Container networks' "$TMP/ed.md" \
   && bad "empty container-networks table header emitted" || ok "no bare container-networks header"
 
+# --------------------------------------------------------- T13 hook: verbs ---
+# The read-only rule now has an enforcement layer as well as its prose, and a
+# hook that is present and inert looks exactly like a hook that works. So it is
+# tested from both sides: a write verb must be refused, and every read-class verb
+# the script actually uses must survive. The pass half is the important one —
+# an over-eager matcher that blocks `zpool list` gets switched off within a day,
+# and then nothing is enforcing anything.
+head_ "T13  Read-only hook (.claude/hooks/no-write-verbs.sh)"
+
+HOOK="$HERE/../.claude/hooks/no-write-verbs.sh"
+if ! command -v jq >/dev/null 2>&1; then
+  printf '  \033[33mSKIP\033[0m  jq not installed\n'
+elif [ ! -r "$HOOK" ]; then
+  bad "hook missing: $HOOK"
+else
+  # try <expected-exit> <label> <command>
+  try() {
+    printf '%s' "$3" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+      | bash "$HOOK" >/dev/null 2>&1
+    R=$?
+    [ "$R" -eq "$1" ] && ok "$2" || bad "$2 — exit $R, expected $1"
+  }
+
+  try 2 'blocks mdcmd'                 'mdcmd status'
+  try 2 'blocks zpool scrub'           'zpool scrub tank'
+  try 2 'blocks a docker write verb'   'docker run -it alpine sh'
+  try 2 'blocks pct stop'              'pct stop 202'
+  try 2 'blocks smartctl -t'           'smartctl -t short /dev/sda'
+  try 2 'blocks modprobe'              'modprobe ipmi_si'
+  try 2 'blocks ddcutil'               'ddcutil detect'
+  try 2 'blocks mount'                 'mount /dev/sdb1 /mnt'
+  try 2 'blocks a package manager'     'pacman -S shellcheck'
+  try 2 'blocks ipmitool chassis'      'ipmitool chassis power status'
+  # Command position, not bare word: the verb must still be caught when it is
+  # not the first thing on the line.
+  try 2 'catches it behind sudo'       'sudo mdcmd status'
+  try 2 'catches it after a pipe'      'echo hi | zpool import -a'
+  try 2 'catches it after a semicolon' 'ls /tmp; docker rm -f c1'
+  try 2 'catches it in a subshell'     '(cd /tmp && docker pull alpine)'
+
+  # Everything hw-inventory.sh actually runs.
+  try 0 'allows zpool list'            'zpool list -H -o name,size,health'
+  try 0 'allows docker inspect'        'docker inspect -f "{{.Name}}" c1'
+  try 0 'allows pct list'              'pct list'
+  try 0 'allows qm list'               'qm list'
+  try 0 'allows btrfs filesystem show' 'btrfs filesystem show'
+  try 0 'allows findmnt'               'findmnt -rno TARGET,SOURCE'
+  try 0 'allows smartctl -H -A'        'smartctl -H -A -n standby /dev/sda'
+  try 0 'allows ipmitool sel list'     'ipmitool sel list last 20'
+  try 0 'allows storcli show'          'storcli64 /c0 show all'
+  try 0 'allows mountpoint'            'mountpoint -q /mnt'
+  # A verb named in order to reject it is documentation, not an invocation —
+  # the same reason T1 strips comments before its own banned-verb grep.
+  try 0 'allows the mdcmd comment'     '# mdcmd is not used: it writes /proc/mdcmd'
+  try 0 'allows a verb as an argument' 'grep -rn "mdcmd" docs/ README.md'
+fi
+
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
