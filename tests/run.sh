@@ -544,14 +544,20 @@ fi
 head_ "T15  Display detection via DRM EDID"
 
 sed -e "s#/sys/class/drm#$FIX/drm#g" "$SCRIPT" > "$TMP/drm.sh"
-bash "$TMP/drm.sh" > "$TMP/d.md" 2>"$TMP/d.err"; RC=$?
+bash "$TMP/drm.sh" > "$TMP/d.md" 2>"$TMP/d.err"
 
 # Binary read through a shell variable is the trap here: a raw EDID captured in
 # a command substitution makes bash write "ignored null byte in input" to
 # stderr, which T2 would only catch on a machine that has a monitor attached.
 [ ! -s "$TMP/d.err" ] && ok "stderr empty (no NUL-byte warning from the EDID read)" \
   || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/d.err"; }
-[ $RC -eq 0 ] && ok "exits 0 — a display section never warns" || bad "exit $RC — expected 0"
+# Never warns — asserted against the warnings block, NOT against the exit code.
+# An unrelated collector failing on whatever host runs this (a CI runner with no
+# real block devices, say) would fail an `exit 0` assertion for reasons that have
+# nothing to do with displays, and a test that red-lines on someone else's
+# problem gets ignored. T2 and T8 own the exit-code contract.
+sed -n '/^## Collection warnings/,$p' "$TMP/d.md" | grep -qiE 'edid|display|drm|monitor' \
+  && bad "the display section produced a warning" || ok "display section never warns"
 grep -q '^| card1-DP-1 |' "$TMP/d.md" && ok "connector row emitted" || bad "connector row missing"
 grep -q 'TESTMON-27' "$TMP/d.md" && ok "product name recovered" || bad "product name missing"
 grep -q 'SN0123456789' "$TMP/d.md" && ok "panel serial recovered" || bad "panel serial missing"
@@ -598,10 +604,13 @@ head_ "T16  UPS data-connection detection"
 
 sed -e "s#/sys/bus/usb/devices#$FIX/usb#g" \
     -e "s#/etc/apcupsd/apcupsd.conf#$FIX/apcupsd/apcupsd.conf#g" "$SCRIPT" > "$TMP/usb.sh"
-bash "$TMP/usb.sh" > "$TMP/ups.md" 2>"$TMP/ups.err"; RC=$?
+bash "$TMP/usb.sh" > "$TMP/ups.md" 2>"$TMP/ups.err"
 
 [ ! -s "$TMP/ups.err" ] && ok "stderr empty" || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/ups.err"; }
-[ $RC -eq 0 ] && ok "exits 0 — a UPS section never warns" || bad "exit $RC — expected 0"
+# Same reasoning as T15: the warnings block, not the exit code. Upper-case UPS
+# on purpose, so the pattern does not match "groups" in an unrelated warning.
+sed -n '/^## Collection warnings/,$p' "$TMP/ups.md" | grep -qE 'UPS|apcupsd|apcaccess|upower|power_supply' \
+  && bad "the UPS section produced a warning" || ok "UPS section never warns"
 grep -q '^### UPS' "$TMP/ups.md" && ok "section emitted from the sysfs read alone" || bad "no UPS section"
 grep -q 'FIXTURE-UPS-1500' "$TMP/ups.md" && ok "device product name read" || bad "product name missing"
 grep -q '0764:0601' "$TMP/ups.md" && ok "vendor:product IDs read" || bad "USB IDs missing"
