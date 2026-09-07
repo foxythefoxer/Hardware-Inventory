@@ -260,25 +260,12 @@ machine; all affect the completeness or fidelity of the report.
 |---|---|
 | C-016 | The megaraid probe targets the first non-NVMe disk, which on some hosts is a USB boot device. |
 
-**Fixed since that review**, listed because the IDs still appear in
-[docs/reviews/](docs/reviews/):
-
-| ID | Was | Now |
-|---|---|---|
-| C-025 / C-026 | Errors suppressed everywhere and always exits `0`; a systematically broken host produced a report that looked complete and was empty. | Collectors that were present and permitted but returned nothing are named under `## Collection warnings`, and the script exits `1`. See [Exit codes](#exit-codes). |
-| C-003 | 26 sites hardcoded `timeout N`, bypassing the `$TMO` fallback; without coreutils `timeout` several sections blanked silently. | Every site routes through the same `have timeout` gate, so a host without `timeout` runs the commands unwrapped instead of failing them. |
-| C-012 | The "physical devices" table filtered by name only, so `md*`, `dm-*` and ZFS zvols appeared as phantom drives — one per VM disk on a Proxmox host with `local-zfs`. | Filtered on `TYPE=="disk"` plus a `zd[0-9]` name exclusion, since zvols report `TYPE=disk` too. |
-| C-001 | No `LC_ALL=C`; a non-English locale left CPU and RAM fields empty. | `export LC_ALL=C` at the top. |
-| C-009 | `/proc/cmdline` emitted verbatim; could carry secrets. | Redacted by parameter name (`password`, `secret`, `token`, `key` — covering `rd.luks.key`) and, since the follow-up, by value for credentials embedded inside dracut's `netroot=iscsi:…@…` form. Names are kept. A filter, not a proof — see the identifying-information note above. |
-| C-020 | The `racadm` block was not root-gated and had no heading, so its output landed under the previous section. | Gated on root, with its own `###` heading. |
-| C-011 | A DIMM with no `Part Number` line was dropped from the table but still counted in the slot total. | Rows are emitted at the record boundary, so every populated slot appears. |
-| C-014 | 23 fixed `head -N` truncation points (the review says 22 — off by one, verified against the file) with no marker when a limit was hit. | Every one is now a named constant consumed through `cap()`, which appends a `--- truncated at N ... ---` marker when the limit is actually hit, and nothing at all otherwise. |
-
-**Deliberate non-goals**, so they aren't re-reported: no `set -e` (a best-effort
-collector must survive absent tools), no `set -o pipefail` (23 pipelines end in `head`,
-22 of which terminate there — the dmidecode wrapper pipes `head`'s output on into `sed` —
-either way `head` raises SIGPIPE and would poison the exit status), no POSIX `sh` support
-(the shebang declares bash).
+Findings already fixed, and proposals deliberately **rejected** — `set -e`,
+`set -o pipefail`, and others — are recorded once, with the measurements behind each
+verdict, in [`docs/DISPOSITIONS.md`](docs/DISPOSITIONS.md). They were summarised here
+too until that second copy drifted from the ledger, so the ledger is now the only
+statement of them. **Read it before opening a PR**: several plausible-looking changes
+have been evaluated and declined, one of which would break the script.
 
 Also deliberate: **`zpool` and `btrfs` returning nothing is never a warning.** Those
 packages are routinely installed on hosts that use neither filesystem, where an empty
