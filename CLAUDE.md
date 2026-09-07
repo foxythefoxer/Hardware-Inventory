@@ -282,7 +282,16 @@ changed. The suite now covers what this section used to ask for by hand:
    without the fix — a stderr-based first draft of T11 did not, since the script
    correctly runs `docker inspect` under `2>/dev/null` and the test was checking a
    channel the script itself discards.
-7. `bash -n` (T1) and ShellCheck (T7, skipped when not installed). Baseline was **zero
+7. **T12 the empty-collection case.** A `docker info` that answers with zero
+   containers is past the section gate and healthy, so it must reach the footer and
+   exit `0`. It did neither: `DNET` was assigned only inside the `[ -n "$CNAMES" ]`
+   guard and tested outside it, so `set -u` killed the script mid-section — no footer,
+   no warnings block, and still exit `1`, which a caller cannot tell from an honest
+   incomplete collection. T11's stub always answers with 105 containers, which is why
+   nothing caught it. **When a tool's output gates an assignment, test the empty
+   answer, not just the failing one** — the pattern to copy is `DMIMEM=""` initialised
+   above its own root gate.
+8. `bash -n` (T1) and ShellCheck (T7, skipped when not installed). Baseline was **zero
    errors, zero warnings** on the default ruleset (24 findings, all severity `note`; the
    `SC2016` hits are false positives from single-quoted awk programs). Do not regress
    this — and note it **still** has not been re-verified since the C-025/C-026 work:

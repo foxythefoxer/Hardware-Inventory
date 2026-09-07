@@ -938,6 +938,14 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
     CNAMES_TOTAL=$(printf '%s\n' "$CNAMES_ALL" | wc -l)
     [ "$CNAMES_TOTAL" -gt "$DOCKER_LIST_LIMIT" ] && CNAMES_TRUNCATED=1
   fi
+  # Initialised before the guard because the emptiness test below sits outside
+  # it: a daemon that answers `docker info` with zero containers is a healthy
+  # state, but it leaves CNAMES empty, and an unset DNET then aborts the whole
+  # script under `set -u` — truncating the report mid-section with no footer
+  # and no `## Collection warnings` block, while still exiting 1 as though the
+  # contract had been honoured. Same reason DMIMEM is initialised before its
+  # own root gate. T12 covers it.
+  DNET=""
   if [ -n "$CNAMES" ]; then
     # shellcheck disable=SC2086
     DNET=$(tmo 15 docker inspect -f '{{.Name}}|{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{if $v.IPAddress}}{{$v.IPAddress}}{{else}}—{{end}} {{end}}' $CNAMES 2>/dev/null \

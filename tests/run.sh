@@ -328,6 +328,63 @@ grep -q -- '--- truncated at 100 container lines ---' "$TMP/dock.md" \
 awk '/Container networks/{t=NR} /container network lookups capped/{m=NR} END{exit !(t>0 && m>0 && m>t)}' "$TMP/dock.md" \
   && ok "deferred marker placed after the container-networks table" || bad "deferred marker placed before or inside the table"
 
+# ------------------------------------------------------- T12 empty docker ----
+# The other half of T11's stub, which always answers with 105 containers. A
+# daemon that answers `docker info` with zero containers is past the section
+# gate and healthy, so it must produce a complete report and exit 0 — but it
+# leaves CNAMES empty, which once left DNET unset and killed the script under
+# `set -u` at the emptiness test. That failure is the silently-incomplete
+# report the exit-code contract exists to prevent: truncated mid-section, no
+# footer, no warnings block, and still exit 1, so a caller checking only $?
+# could not tell it from an honest incomplete collection.
+head_ "T12  Docker daemon with zero containers"
+
+mkdir -p "$TMP/emptydocker"
+cat > "$TMP/emptydocker/docker" << 'EMPTYEOF'
+#!/bin/sh
+case "$1" in
+  info) exit 0 ;;
+  version) echo "Docker 28.0.0" ;;
+  # Real docker prints the table header even with nothing to list, and prints
+  # nothing at all for the bare --format form. Both are reproduced: the header
+  # is exactly the "prints a banner with no records" shape that makes an
+  # emptiness test the wrong check elsewhere in this script.
+  ps)
+    if printf '%s' "$*" | grep -q 'table'; then
+      printf 'NAMES     IMAGE     STATUS    PORTS\n'
+    fi
+    ;;
+  # Never reached while the CNAMES guard holds. If a later change drops it,
+  # `docker inspect` runs with no container arguments — a usage error on real
+  # docker. Detect that from the report, not stderr (T11's lesson: the script
+  # runs inspect under 2>/dev/null, so stderr is invisible to the test).
+  inspect)
+    shift
+    while [ "$1" = "-f" ]; do shift 2; done
+    [ $# -eq 0 ] && echo "/INSPECT-CALLED-WITH-NO-CONTAINERS|bogus=1 "
+    ;;
+esac
+EMPTYEOF
+chmod +x "$TMP/emptydocker/docker"
+
+PATH="$TMP/emptydocker:$PATH" bash "$SCRIPT" > "$TMP/ed.md" 2>"$TMP/ed.err"; RC=$?
+
+[ ! -s "$TMP/ed.err" ] && ok "stderr empty (no unbound-variable abort)" \
+  || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/ed.err"; }
+grep -q 'End of report' "$TMP/ed.md" && ok "report reaches its footer" || bad "report truncated before the footer"
+[ $RC -eq 0 ] && ok "exits 0 — zero containers is healthy, not a warning" || bad "exit $RC — expected 0"
+grep -q '^## Collection warnings' "$TMP/ed.md" \
+  && bad "zero containers produced a warning" || ok "no warning for zero containers"
+# The gate passed, so the section must still be present: a test that merely
+# checked for a complete report would also pass if Docker were skipped entirely.
+grep -q '^### Docker' "$TMP/ed.md" && ok "Docker section still emitted" || bad "Docker section missing"
+grep -q 'INSPECT-CALLED-WITH-NO-CONTAINERS' "$TMP/ed.md" \
+  && bad "docker inspect was called with no container arguments" \
+  || ok "docker inspect not called without containers"
+# Section-output convention: absent hardware never leaves a bare table header.
+grep -q 'Container networks' "$TMP/ed.md" \
+  && bad "empty container-networks table header emitted" || ok "no bare container-networks header"
+
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
