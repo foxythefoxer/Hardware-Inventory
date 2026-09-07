@@ -1,0 +1,141 @@
+# A form, not a prose template, because a prose template can be ignored and
+# `validations: required` cannot.
+#
+# The three required questions below are the three grounds FR-003 was rejected
+# on, moved to the point of filing. That request proposed a `fastfetch`
+# cross-check and failed on all three at once: fastfetch executes `command`
+# modules out of the host's own config.jsonc, so a bare call writes; its
+# MemTotal is byte-identical to /proc/meminfo, so it is a second parser rather
+# than a second source; and the request identified its host by name. Every one
+# of those was answerable by the filer before submitting.
+
+name: Feature request
+description: Propose a new collector, field or section for hw-inventory.sh
+labels: ["feature-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Read [`docs/DISPOSITIONS.md`](../blob/main/docs/DISPOSITIONS.md) first.**
+        Several plausible proposals have already been evaluated and declined, with
+        the measurements behind each verdict. Reopening one needs new evidence.
+
+        Two rules decide most requests, so answer for them below rather than
+        around them:
+
+        1. **The script is read-only.** Every command must be a query. A change
+           that introduces a write is rejected regardless of how useful the data
+           would be — the read-only path, or the data stays uncollected.
+        2. **This repository is public.** Everything in this issue is published,
+           including anything you paste. Identify hosts by *class*, never by name.
+
+  - type: textarea
+    id: gap
+    attributes:
+      label: What is missing from the report today?
+      description: The fact you want collected, and what a reader can't do without it.
+      placeholder: |
+        Attached displays are invisible. A report cannot answer "which panel is on
+        which output" without someone walking to the machine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: source
+    attributes:
+      label: What read-only source provides this data?
+      description: |
+        Name the exact file or command. A sysfs/procfs path is the strongest
+        answer. If it is a command, give the full invocation including flags,
+        and say which verb class it is — `show`/`list`/`status` verbs only.
+      placeholder: |
+        /sys/class/drm/card*-*/edid — a world-readable sysfs file, no command.
+        (`ddcutil` reads the same data but DDC/CI is bidirectional over i2c-dev,
+        so querying the monitor writes to it. Rejected on that basis.)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source_or_parser
+    attributes:
+      label: Is this a second SOURCE, or a second PARSER of a source the script already reads?
+      description: |
+        **A tool that reads the same file is not a second opinion.** If the answer
+        is "second parser", the request is very likely already rejected under
+        FR-003 — check the underlying file before filing, not the tool's output.
+      options:
+        - A new source the script does not read today
+        - A second parser of a file the script already reads
+        - Not sure — I have not traced where the tool gets its values
+    validations:
+      required: true
+
+  - type: textarea
+    id: startup_behaviour
+    attributes:
+      label: If this needs a new tool, what does that tool read or execute at startup?
+      description: |
+        The ban covers a tool's *config*, not just its verb. A tool that loads a
+        config file from the host and can run a shell string out of it writes as
+        root under this script's documented `sudo` invocation, whatever verb you
+        pass it. A flag that suppresses it is not sufficient on its own — that
+        moves the guarantee into a third party's release notes.
+
+        Answer "no new tool" if it is a plain file read.
+      placeholder: |
+        No new tool — plain read of a sysfs file.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host_class
+    attributes:
+      label: What host CLASS was this measured on?
+      description: Class, never a hostname. See the confirmation at the bottom.
+      options:
+        - Unraid
+        - Proxmox VE node (bare metal)
+        - Proxmox LXC
+        - Whitebox desktop / workstation
+        - Debian / Ubuntu
+        - Fedora / RHEL
+        - Arch / CachyOS
+        - Alpine / musl
+        - Other (say which in the evidence field)
+        - Not measured on any host — reasoning only
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: What did you actually measure?
+      description: |
+        Name the measurement, not the machine. Byte counts, file modes, timings
+        and hardware models are what make a verdict auditable and are all
+        publishable — a panel model anyone can buy is fine. A hostname is a
+        machine on someone's LAN.
+      placeholder: |
+        On a whitebox AM5 desktop: two card1-DP-* nodes, edid is 0444 and 128
+        bytes, readable as an unprivileged user, and populated while headless.
+        On a Proxmox LXC: /sys/class/drm is empty, so the section stays absent.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: publishing
+    attributes:
+      label: Before submitting
+      options:
+        - label: >-
+            This issue contains no hostnames, IP or MAC addresses, network
+            topology, real names or email addresses — mine or anyone's.
+          required: true
+        - label: >-
+            It does not name any private notes vault or its filenames. Naming the
+            filing agent is fine; that identifies an agent, not an estate.
+          required: true
+        - label: >-
+            I checked `docs/DISPOSITIONS.md` and this is not an already-rejected
+            proposal being re-filed without new evidence.
+          required: true

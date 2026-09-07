@@ -1,0 +1,101 @@
+# The publishing risk is sharper here than on a feature request: the natural
+# thing to attach to a bug report is the report the script produced, and that
+# document is nothing but hostnames, serials, MACs and BMC addresses. The form
+# asks for the failing section, redacted, rather than the file.
+#
+# The bug class worth naming up front is the hang. Errors in this script are
+# handled by design; every genuine defect found so far has been something that
+# stopped returning. Exit 124 under the suite means exactly that.
+
+name: Bug report
+description: A collector returns the wrong thing, hangs, or the script fails to complete
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste a raw report.** A complete inventory contains serial
+        numbers, MAC addresses, internal IPs and BMC configuration by design.
+        Redact them, or paste only the few lines that show the problem.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what should have happened instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: Which of these is it?
+      options:
+        - The script did not finish, or took far longer than expected (a hang)
+        - A section is empty when the hardware is present
+        - A section has wrong values
+        - The exit code disagrees with the report (see Exit codes in the README)
+        - Something is leaked that should be redacted
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host_class
+    attributes:
+      label: Host class
+      description: Class, never a hostname.
+      options:
+        - Unraid
+        - Proxmox VE node (bare metal)
+        - Proxmox LXC
+        - Whitebox desktop / workstation
+        - Debian / Ubuntu
+        - Fedora / RHEL
+        - Arch / CachyOS
+        - Alpine / musl
+        - WSL
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: exit_code
+    attributes:
+      label: Exit code
+      description: >-
+        `0` is complete, `1` is written-in-full-but-a-collector-failed. Anything
+        else is interesting on its own — under the suite, `124` means it hung.
+      placeholder: "1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: The relevant lines, redacted
+      description: >-
+        The failing section, plus the `## Collection warnings` block if there is
+        one. Replace serials, MACs and addresses with `REDACTED` — the shape is
+        what matters, not the values.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: suite
+    attributes:
+      label: Does `bash tests/run.sh` pass on your host?
+      description: Paste the summary line. If a test fails, paste that test's block.
+      placeholder: "63 passed, 0 failed"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: publishing
+    attributes:
+      label: Before submitting
+      options:
+        - label: >-
+            I have redacted serials, MAC addresses, IP addresses and hostnames
+            from everything pasted above.
+          required: true

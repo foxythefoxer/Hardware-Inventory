@@ -1,0 +1,4 @@
+# Blank issues are disabled because the forms are the enforcement. Their
+# required fields are the three grounds FR-003 was rejected on and the
+# publishing rule; a blank issue is a route around all of them.
+blank_issues_enabled: false
