@@ -1,0 +1,71 @@
+# What this suite asserts, and why it is shaped this way.
+#
+# Every genuine bug in this project has been a HANG, not an error — three static
+# code reviews of hw-inventory.sh missed the one real defect because none of them
+# ran it. So the suite is not a linter with a test suite bolted on: T3 puts stubs
+# on PATH that fail and sleep, and asserts the script still reaches its footer.
+# An exit of 124 there means it hung, which is the whole defect class.
+#
+# Two things CI does that a dev machine cannot, which is the reason this file
+# exists at all:
+#
+#   1. Ubuntu runners ship ShellCheck. T7 skips itself when shellcheck is absent,
+#      and it was absent on the maintainer's host — installing it needed an
+#      interactive sudo password no agent session has, so the ShellCheck baseline
+#      went unverified for the whole of the C-025/C-026 work. Here it always runs.
+#
+#   2. CI has root. T6's megaraid drive probe is root-gated (the script only
+#      probes SMART as root, by design) and prints SKIP otherwise, so the sparse
+#      `megaraid,N` fixture went unexercised on any unprivileged run.
+#
+# Both runs are kept. Unprivileged is the ordinary case and must stay green on
+# its own — dropping it would hide a regression that only bites a non-root user,
+# which is most users. Root is the extra coverage, not a replacement for it.
+#
+# The suite is read-only, like the thing it tests: it creates nothing outside a
+# mktemp dir it removes on exit, so there is nothing to clean up here.
+
+name: tests
+
+# The two path lists are duplicated on purpose: the GitHub Actions parser does
+# not resolve YAML anchors, so an `&x`/`*x` here silently yields an empty filter
+# and the workflow fires on everything. Keep them in sync by hand.
+on:
+  push:
+    paths:
+      - 'hw-inventory.sh'
+      - 'tests/**'
+      - '.github/workflows/tests.yml'
+  pull_request:
+    paths:
+      - 'hw-inventory.sh'
+      - 'tests/**'
+      - '.github/workflows/tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned so a green run means something specific. The T7 baseline is zero
+      # errors and zero warnings on the default ruleset; if a runner image bump
+      # changes shellcheck's findings, that shows up as a test failure and not as
+      # a silently different baseline.
+      - name: Record tool versions
+        run: |
+          bash --version | head -1
+          shellcheck --version | sed -n '2,4p'
+
+      - name: Suite, unprivileged
+        run: bash tests/run.sh
+
+      # T6's drive probe only runs here. Everything else is re-run as a
+      # consequence, which is cheap and occasionally informative: several
+      # branches (dmidecode, SMART, pct/qm, IPMI) are reachable no other way.
+      - name: Suite, root
+        run: sudo bash tests/run.sh
