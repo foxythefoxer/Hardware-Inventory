@@ -1,0 +1,21 @@
+#!/bin/bash
+# T6 asserts the `-d megaraid,N` probe, and that probe is gated on $DISKS
+# holding at least one non-nvme name — MRTGT is picked by skipping nvme* and
+# taking the first survivor. Without this stub $DISKS came from the RUNNER's
+# real lsblk, so the test passed only on a machine that happened to have a
+# non-NVMe disk. GitHub's fleet is mixed at the same image version: some SKUs
+# expose sda, some only nvme0n1, and on the latter MRTGT was empty, the probe
+# never ran, and all four sparse-ID assertions failed while looking like a
+# parsing bug. The controller fixture is mocked; the disk it hangs off has to
+# be too, or the test is a coin flip on the hardware underneath the runner.
+#
+# Both call sites are answered: the plain form feeds $DISKS/MRTGT, the -P form
+# feeds the device table, and leaving -P unhandled trips the "none survived the
+# physical-disk filter" warning on a run where nothing is actually wrong.
+for a in "$@"; do
+  case "$a" in
+    -*P*) echo 'NAME="sda" TYPE="disk" SIZE="3.6T" ROTA="1" TRAN="sata" MODEL="ST4000NM0033-9ZM170" SERIAL="Z1Z8ABC0"'
+          exit 0 ;;
+  esac
+done
+printf 'sda     disk\n'

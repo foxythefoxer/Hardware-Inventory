@@ -567,6 +567,44 @@ that for a *missing* file while an *empty* one produced exactly the state it
 warns about. The count assertion fails locally and prints a note under `CI`,
 where the example copy is deliberate.
 
+### CI-003 — the root pass failed on two counts CI-002 could not have caught — accepted, done
+
+Found by merging CI-002 to `main` **before its own CI run finished**. The branch was
+green at the commit before it; the commit that landed had never been run anywhere but
+this host, where neither defect is reachable. Both are root-pass-only, and the root pass
+is the half no development machine here executes.
+
+**`sudo` scrubs `$CI`, so the note became a failure.** CI-002 made a zero-pattern list a
+failing assertion, downgraded to a `NOTE` when `$CI` is set — the workflow copies the
+empty example into place two steps earlier, so that state is deliberate there. The root
+step ran `sudo bash tests/run.sh`, and sudo drops the environment by default: the root
+pass saw no `$CI`, concluded it was on the maintainer's machine, and failed on a
+condition the workflow had just created on purpose. Fixed with `--preserve-env=CI`, not
+`-E` — several tests work by putting stubs on `PATH`, and `-E` would carry that in too.
+
+**T6's drive probe depended on the runner's real disk topology.** This one predates
+CI-002 and was latent from the moment the root job was added. The megaraid probe picks
+`MRTGT` by taking the first non-`nvme*` name in `$DISKS`, and `$DISKS` came from the
+runner's *real* `lsblk` — the controller was mocked, the disk it hangs off was not. On a
+runner exposing `sda` all four sparse-ID assertions pass; on an NVMe-only one `MRTGT` is
+empty, the probe never runs, and the four failures read as a megaraid parsing bug. Same
+image version both times, different hardware underneath — GitHub's fleet is mixed, so the
+test was a coin flip on the SKU. Fixed with an `lsblk` stub in `percbin` answering both
+call sites (the plain form feeds `$DISKS`, the `-P` form feeds the device table; leaving
+`-P` unhandled trips the "none survived the physical-disk filter" warning on a run where
+nothing is wrong).
+
+Two lessons, and the second is the larger one:
+
+- **A partly-mocked fixture is an untrustworthy test.** Mocking the thing under test and
+  leaving its *precondition* to the host makes a green run mean "this machine had a SATA
+  disk", not "the parser works". Mock the whole path or assert nothing.
+- **A green tick belongs to a commit, not to a branch.** CI-002 was merged on the
+  strength of the run before it. That is the same error shape as CI-001 and CI-002
+  themselves — a check that looks present and is not running — committed this time by the
+  person reading the check rather than by the check. **Wait for the run on the exact
+  commit being merged.**
+
 ---
 
 ## Verified reviewer claims

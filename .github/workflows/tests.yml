@@ -91,6 +91,13 @@ jobs:
       # when the comment above was written. A failure in one pass must not hide
       # the other's result. `!cancelled()` rather than `always()`: a cancelled
       # run should stop, not push on to a second three-minute suite.
+      # `--preserve-env=CI` and not a bare `sudo`: the zero-pattern assertion in
+      # T14 downgrades to a NOTE when $CI is set, because the empty example copy
+      # is deliberate here and a failure everywhere else. sudo scrubs the
+      # environment by default, so the root pass saw no $CI, believed it was on
+      # the maintainer's machine and failed on a state this workflow creates on
+      # purpose two steps up. Only CI is carried over — `-E` would drag PATH in
+      # with it, and several tests here work by putting stubs on PATH.
       - name: Suite, root
         if: ${{ !cancelled() }}
-        run: sudo bash tests/run.sh
+        run: sudo --preserve-env=CI bash tests/run.sh
