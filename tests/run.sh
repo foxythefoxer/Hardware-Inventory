@@ -31,6 +31,39 @@ head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 # exit code calls this.
 dumpwarn() { sed -n '/^## Collection warnings/,/^_/p' "$1" | sed 's/^/        /'; }
 
+# CI-004. For a run against the LIVE host, the exit code is a fact about that
+# host and not about the script. A collector that is present but not permitted
+# warns and exits 1, and is RIGHT to: an unprivileged `lspci` that enumerates
+# nothing cannot be told apart from a broken one, and the report must not then
+# claim the host has no RAID controller. So `[ $RC -eq 0 ]` against the live
+# host asserts the runner's hardware, not this script — it was red on every CI
+# run this workflow made before CI-001, and again on the exact commit v6 tags,
+# where one runner passed and the next failed on nothing but an lspci that
+# answered for root and not for the ordinary user.
+#
+# What IS invariant is the contract the report states about itself: a `##
+# Collection warnings` block if and only if exit 1. That is strictly more than
+# the old check — it also catches warning-while-exiting-0, and any exit that is
+# neither — and it holds on any host. A test that needs a *controlled* exit code
+# builds the whole PATH (T8's minbin) rather than asserting over whatever the
+# runner happens to have installed.
+rc_agrees() {   # $1 exit code, $2 report
+  if grep -q '^## Collection warnings' "$2"; then
+    if [ "$1" -eq 1 ]; then
+      ok "exit 1 with a warnings block — the contract holds"
+      # Not a failure, but the one thing worth seeing in a log nobody can log in
+      # to: which collector this particular host could not read.
+      printf '  \033[33mNOTE\033[0m  this host warned:\n'; dumpwarn "$2"
+    else
+      bad "exit $1 — a warnings block must mean exit 1:"; dumpwarn "$2"
+    fi
+  elif [ "$1" -eq 0 ]; then
+    ok "exit 0 with no warnings block — the contract holds"
+  else
+    bad "exit $1 with no warnings block — a non-zero exit must name the collector that caused it"
+  fi
+}
+
 [ -r "$SCRIPT" ] || { echo "cannot read $SCRIPT"; exit 1; }
 echo "Testing: $SCRIPT"
 [ "$(id -u)" -eq 0 ] || echo "Running as $(id -un) — root-only tests will be skipped."
@@ -85,7 +118,7 @@ fi
 head_ "T2  Clean run on an ordinary host"
 
 bash "$SCRIPT" > "$TMP/clean.md" 2> "$TMP/clean.err"; RC=$?
-if [ $RC -eq 0 ]; then ok "exits 0"; else bad "exit $RC — a collector on this host warned:"; dumpwarn "$TMP/clean.md"; fi
+rc_agrees "$RC" "$TMP/clean.md"
 [ ! -s "$TMP/clean.err" ] && ok "stderr empty" || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/clean.err"; }
 grep -q 'End of report' "$TMP/clean.md" && ok "reaches footer" || bad "no footer"
 
@@ -429,20 +462,14 @@ PATH="$TMP/emptydocker:$PATH" bash "$SCRIPT" > "$TMP/ed.md" 2>"$TMP/ed.err"; RC=
 [ ! -s "$TMP/ed.err" ] && ok "stderr empty (no unbound-variable abort)" \
   || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/ed.err"; }
 grep -q 'End of report' "$TMP/ed.md" && ok "report reaches its footer" || bad "report truncated before the footer"
-if [ $RC -eq 0 ]; then
-  ok "exits 0 — zero containers is healthy, not a warning"
-else
-  bad "exit $RC — expected 0; the warnings below say which collector, and it may be an unrelated one:"
-  dumpwarn "$TMP/ed.md"
-fi
-# Note this fires on ANY warning, not only a docker one — it is coupled to
-# whatever else happens to be installed on the host running the suite. Read the
-# dump above before blaming the docker section.
-if grep -q '^## Collection warnings' "$TMP/ed.md"; then
-  bad "zero containers produced a warning"
-else
-  ok "no warning for zero containers"
-fi
+rc_agrees "$RC" "$TMP/ed.md"
+# The docker claim itself, asserted where it belongs: against the warnings block
+# and by name. The old `exit 0` here fired on ANY warning from ANY collector on
+# the host, so a red T12 read as a docker bug and never was — twice. Zero
+# containers is healthy, and this is what says so.
+sed -n '/^## Collection warnings/,$p' "$TMP/ed.md" | grep -qi 'docker' \
+  && bad "a docker daemon with zero containers produced a warning" \
+  || ok "zero containers is healthy, not a warning"
 # The gate passed, so the section must still be present: a test that merely
 # checked for a complete report would also pass if Docker were skipped entirely.
 grep -q '^### Docker' "$TMP/ed.md" && ok "Docker section still emitted" || bad "Docker section missing"
@@ -763,13 +790,14 @@ PCIEOF
 chmod +x "$TMP/pcibin/lspci"
 
 PATH="$TMP/pcibin:$PATH" bash "$SCRIPT" > "$TMP/pci.md" 2>/dev/null; RC=$?
-if [ $RC -eq 0 ]; then
-  ok "exits 0 — no matching PCI devices is absent hardware, not a failure"
-else
-  bad "exit $RC — a filtered-empty PCI list must not warn:"; dumpwarn "$TMP/pci.md"
-fi
-grep -q 'lspci -nnk' "$TMP/pci.md" \
-  && bad "warned about lspci -nnk although it returned a full listing" \
+rc_agrees "$RC" "$TMP/pci.md"
+# By name, not by exit code: `$FIX/pcibin` is PREPENDED, so every other collector
+# on the host is still live and any one of them warning would otherwise read as a
+# PCI failure. Scoped to the warnings block and matching `lspci` rather than
+# `lspci -nnk`, so it covers the plain-lspci warning as well — deleting either
+# message must not pass here.
+sed -n '/^## Collection warnings/,$p' "$TMP/pci.md" | grep -q 'lspci' \
+  && bad "warned about lspci although it returned a full listing" \
   || ok "no lspci warning when the filter simply matched nothing"
 # Section-output convention: no bare heading, and no empty code fence either —
 # the fence is why T2's empty-table-header check never caught this.

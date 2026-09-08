@@ -87,6 +87,13 @@ Verified against the file and covered by `tests/run.sh` where testable.
   live daemon** — this host has the UPS attached with neither apcupsd nor NUT
   installed, which is precisely why sysfs is the gate. Confirm those two rows
   on a host running apcupsd (**FT-001**); the no-UPS-at-all case is **FT-002**.
+- **CI-004** — T2, T12 and T17 asserted `exit 0` against the *live* host, so any
+  collector the runner happened to degrade failed a test about something else. The
+  `v6` tag caught it: `a476d3f` was green on one runner and red on the next, on an
+  unprivileged `lspci` that enumerated nothing and answered for root. The script was
+  right to warn; the tests were asserting the runner's hardware. Now `rc_agrees`
+  asserts the contract — a warnings block iff exit 1 — and each test's own claim is
+  checked by name against that block. CI-001 fixed a cause of this and left the class.
 - **CI-001** — the PCI section warned on its *filtered* output, so a guest whose NIC and
   disks are paravirtual — matching none of the section's device classes — was called
   broken. That one warning is why every CI run this workflow ever made was red, and why

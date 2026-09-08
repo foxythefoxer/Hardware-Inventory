@@ -636,6 +636,54 @@ Two lessons, and the second is the larger one:
 
 ---
 
+### CI-004 — three tests asserted the runner's hardware, not the script — accepted, done
+
+Found on the `v6` tag's run. `a476d3f` was pushed twice within 21 seconds — to `main` and
+as the tag — and the same commit went **green on one runner and red on the next**, T2
+alone, unprivileged pass only, root pass green on the same machine. Re-running the failed
+job on the identical commit turned it green. Nothing in the batch it tagged touched the
+code involved: the warning is `b3872ff`'s, from C-025/C-026.
+
+**What the runner did.** `lspci` was installed and enumerated nothing for the ordinary
+user, while answering for root four seconds later on the same host. The script cannot
+tell that apart from a broken `lspci`, so it warned and exited 1 — **correctly.** The
+exit-code contract says a warning means present, permitted and empty, and an unprivileged
+tool that fails without saying why is indistinguishable from one that is permitted. The
+report must not claim a host has no RAID controller on the strength of a listing nobody
+could read.
+
+**So the defect is in the suite, not the script.** `[ $RC -eq 0 ]` against the live host
+asserts that *the runner* has no degraded collector. Three tests did it — T2, T12 and
+T17's first case — and T12 did it twice, once on the exit code and once on a bare grep for
+the warnings block. All three prepend their stubs to `$PATH`, so every other collector on
+the host stays live and any one of them warning red-lines a test about docker, or PCI, or
+nothing at all. This is the third recurrence of one shape: **CI-001 fixed a cause and left
+the class.** Its own note records the same symptom — "the failures landed on T2 and T12,
+which look like docker and displays problems and are not."
+
+**Fixed with the contract the report states about itself:** a `## Collection warnings`
+block **if and only if** exit 1, in one `rc_agrees` helper. That is strictly stronger than
+what it replaces — it catches warning-while-exiting-0, which nothing checked, and any exit
+that is neither 0 nor 1 — and it holds on any host. What each test actually claims is
+asserted where T15 and T16 already put it: **by name, scoped to the warnings block.** T12
+greps it for `docker`, T17 for `lspci`. A test that needs a *controlled* exit code builds
+the whole `PATH` the way T8's `minbin` does, instead of asserting over whatever the runner
+happens to have installed. When a run does warn, `rc_agrees` prints the block as a `NOTE`
+— the one fact worth having in a log nobody can log in to, without failing on it.
+
+Verified by mutation, each reverted after: an `lspci` stub that enumerates nothing
+reproduces the failure exactly and now passes; deleting the `|| exit 1` makes T2 fail
+(**the old assertion passed that mutation**); `exit 2` makes T2 fail; a `docker version`
+that returns nothing makes T12 fail by name.
+
+The lesson is CI-003's, one level up. That one said a green tick belongs to a commit, not
+a branch. This one says **a green tick belongs to a commit _on a runner_** — the fleet is
+mixed, as CI-003 itself found on T6's disk topology, and a test that reads the host will
+eventually read a different one. `main` was green here on the exact commit merged, and the
+rule was followed; the rule was not enough, because the test was a coin flip.
+
+---
+
 ## Verified reviewer claims
 
 Checked against ShellCheck 0.10.0 and the file itself:
