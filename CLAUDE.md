@@ -120,6 +120,7 @@ description of topology, a named private vault, or a name it was never told.
 |---|---|---|
 | Exit-code contract · Conventions · Rejected proposals · Testing | [`.claude/rules/collectors.md`](.claude/rules/collectors.md) | `hw-inventory.sh`, `tests/**` or the ledger is read |
 | Accepted work not yet done, and what's already done | [`docs/QUEUE.md`](docs/QUEUE.md) | You open it |
+| Branches only another host class can verify, and what to ask for | [`docs/FIELD-TESTS.md`](docs/FIELD-TESTS.md) | `/hw-check` phase 4, or you open it |
 | Every verdict, with its measurements | [`docs/DISPOSITIONS.md`](docs/DISPOSITIONS.md) | You open it |
 | Recording a new verdict, and replying to the issue | `/adjudicate` | You invoke it |
 | Verifying a change before committing | `/hw-check` | You invoke it |
@@ -129,6 +130,13 @@ description of topology, a named private vault, or a name it was never told.
 outstanding.** The filing session stops at submission by design and deletes
 accepted items from its own backlog once adjudicated, so nothing outside this
 repo will notice if that queue rots.
+
+**One machine develops this script, and a green suite says nothing about the host
+classes it isn't.** When a change cannot be verified here because this host is the
+wrong *class* — no ZFS zvols, no UPS daemon, never unprivileged — file it in
+`docs/FIELD-TESTS.md` with the exact command and the smallest answer that settles
+it. The operator runs those elsewhere in the estate. Asking for a whole report
+back is a publishing-rule problem; ask a question instead.
 
 A fresh clone needs two one-time steps before the git-side hooks do anything —
 see **Contributing** in the README.

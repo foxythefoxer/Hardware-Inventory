@@ -189,6 +189,7 @@ platform: "bare-metal"
 cpu: "Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz"
 ram: "94Gi"
 collected: 2026-08-06
+collector: hw-inventory.sh v5
 tags: [homelab, inventory, hardware]
 ---
 ```
@@ -196,9 +197,18 @@ tags: [homelab, inventory, hardware]
 Sections, each emitted only when it applies: Identity · Snapshot (volatile) · CPU ·
 Boot and kernel parameters · Memory and DIMMs · Storage devices · SMART health ·
 RAID controller · Unraid array, slots and shares · Filesystems and pools · Network
-interfaces · PCI devices · BMC / IPMI · Proxmox LXC and VM tables · Docker · Failed
-systemd units · Collection warnings (only when something failed — see
+interfaces · Displays · UPS · PCI devices · BMC / IPMI · Proxmox LXC and VM tables ·
+Docker · Failed systemd units · Collection warnings (only when something failed — see
 [Exit codes](#exit-codes)).
+
+### Version
+
+`collector:` is the version a vault files the report under, and it is the only
+place the version appears in the output. It moves when the report's shape changes:
+**v5** added the Displays and UPS sections. What changed in each version is the
+*Done* list in [`docs/QUEUE.md`](docs/QUEUE.md). The version is written twice in
+the script — the header comment and that `printf` — and T1 fails if the two ever
+disagree, which is how a stale `collector:` misfiling every report gets caught.
 
 ### Diffing two runs
 
@@ -288,6 +298,7 @@ tests/run.sh         the test suite — bash tests/run.sh
 tests/fixtures/      failing/hanging tool stubs, Unraid, Proxmox and cmdline mocks
 docs/DISPOSITIONS.md accept/reject/defer ledger — every adjudicated proposal, with reasons
 docs/QUEUE.md        accepted work not yet done, and what is already done
+docs/FIELD-TESTS.md  what needs running on a host class the development machine isn't
 docs/reviews/        independent code reviews and the prompt used to generate them
 docs/prompts/        prompts for ingesting output into an Obsidian vault
 .claude/rules/       conventions, the exit-code contract and rejected proposals
@@ -332,6 +343,13 @@ bash tests/run.sh      # all tests must pass; add one for what you changed
 CI runs the same suite on every push and pull request, unprivileged and again as
 root — the root pass is the only place the megaraid drive probe is exercised, and
 the runner is the only place ShellCheck is guaranteed present.
+
+**A green suite says nothing about the host classes you don't have.** This script is
+developed on one machine, and a condition that machine cannot reach — no ZFS zvols, no
+UPS daemon, never unprivileged, monitors always attached — is unverified no matter how
+many tests pass. Those go in [`docs/FIELD-TESTS.md`](docs/FIELD-TESTS.md) as a command
+and the answer wanted, to be run on a host that *is* the right class. Ask a question,
+never for a report: a report is estate identity, and this repo is public.
 
 The suite makes every external tool fail or hang and confirms the script still completes,
 reaches its footer, and exits `1` rather than `124`. Bugs in this project have

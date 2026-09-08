@@ -126,3 +126,11 @@ FAIL — 108 passed, 1 failed. T12 regressed: <what and where>.
 If anything is unverified — a branch that needs root, a condition that needs a
 host class you do not have — name it in the verdict rather than letting a green
 line imply coverage that does not exist.
+
+**A verdict scrolls away; file the host-class ones.** Where the blocker is "this
+machine is the wrong class" — no zvols, no UPS daemon, always root, monitors
+attached — add an entry to [`docs/FIELD-TESTS.md`](../../../docs/FIELD-TESTS.md)
+in the same commit: needs / why not here / run / send back. That file is the only
+record, and the operator runs those requests on other hosts in the estate. Ask
+for the smallest answer that settles it, never for a report — a pasted report is
+estate identity one copy-paste away from a public commit.

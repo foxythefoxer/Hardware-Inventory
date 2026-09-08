@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hw-inventory.sh v4 — emit a Markdown block describing this host.
+# hw-inventory.sh v5 — emit a Markdown block describing this host.
 #
 # Read-only. Collects nothing off-box, writes nothing, sends nothing.
 # Every command is a query. Deliberately absent: smartctl -t (self-tests),
@@ -260,7 +260,7 @@ yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
 printf 'collected: %s\n' "$(date '+%Y-%m-%d')"
-printf 'collector: hw-inventory.sh v4\n'
+printf 'collector: hw-inventory.sh v5\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 

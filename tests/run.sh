@@ -60,6 +60,19 @@ else
   ok "set -e and pipefail correctly absent"
 fi
 
+# The version is written twice: the header comment, and the `collector:`
+# frontmatter field a vault files the report under. A code review flagged that
+# pair as undetectably driftable — a stale `collector:` misfiles every report
+# and nothing else in the suite reads it. Now one of them going stale is a
+# failing test, not an archaeology problem six months later.
+HDRV=$(sed -n 's/^# hw-inventory\.sh \(v[0-9][0-9]*\) .*/\1/p' "$SCRIPT")
+FMV=$(sed -n "s/^printf 'collector: hw-inventory\.sh \(v[0-9][0-9]*\).*/\1/p" "$SCRIPT")
+if [ -n "$HDRV" ] && [ "$HDRV" = "$FMV" ]; then
+  ok "version agrees in both places ($HDRV)"
+else
+  bad "version mismatch: header '$HDRV', frontmatter '$FMV'"
+fi
+
 # ----------------------------------------------------------------- T2 clean --
 head_ "T2  Clean run on an ordinary host"
 

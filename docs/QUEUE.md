@@ -11,6 +11,10 @@ the verdict was, then stops by design — it does not track whether this repo
 implemented anything, and it deletes accepted items from its own backlog once
 adjudicated. Nothing outside this repo will notice if this list rots.
 
+Work that is *done* but proven on only one host class is not tracked here — it is
+in [`FIELD-TESTS.md`](FIELD-TESTS.md), with the command to run and the answer
+wanted. The notes below name the `FT-` id where one exists.
+
 ---
 
 ## Remaining
@@ -44,7 +48,8 @@ enumerates a condition set is the long form in miniature and drifts exactly as
 the long form does, which is why these lines do not try. Each was written against
 a real host, and FR-004 marks the conditions that could not be verified here;
 confirm those on a Proxmox LXC and a whitebox board rather than shipping them on
-reasoning alone.
+reasoning alone — **FT-006**, and it wants answering *before* the implementation,
+not after.
 
 ---
 
@@ -58,7 +63,10 @@ Verified against the file and covered by `tests/run.sh` where testable.
   stat-0 gate is the one that needed a fixture trick: a committed 128-byte file
   has a 128-byte `stat`, so a `[ -s ]` regression passed the whole suite until
   `card1-DP-8/edid` was made a symlink to a procfs file — the one thing
-  available that stats as 0 and still reads non-empty.
+  available that stats as 0 and still reads non-empty. Unproven off this host
+  class: the headless case, where the section must stay silent (**FT-003**), and
+  the `strings` fallback against real panel EDID rather than the fixture
+  (**FT-004**).
 - **FR-002** — UPS detection, sysfs `idVendor` as the primary signal, with
   apcupsd config, `apcaccess`, UPower and `power_supply` layered on top of it.
   T16 covers both directions, and the negative half runs under T8's stripped
@@ -66,7 +74,7 @@ Verified against the file and covered by `tests/run.sh` where testable.
   the suite. **The `power_supply` and `apcaccess` rows are unverified against a
   live daemon** — this host has the UPS attached with neither apcupsd nor NUT
   installed, which is precisely why sysfs is the gate. Confirm those two rows
-  on a host running apcupsd.
+  on a host running apcupsd (**FT-001**); the no-UPS-at-all case is **FT-002**.
 - **C-025 / C-026** — warning accumulator and meaningful exit code. The
   exit-code contract in `.claude/rules/collectors.md` is the operative statement
   of it.
@@ -80,7 +88,7 @@ Verified against the file and covered by `tests/run.sh` where testable.
 - **C-012** — physical-devices table filtered on `TYPE=="disk"` *plus* a
   `zd[0-9]` name exclusion; the `TYPE` filter alone does not catch zvols, which
   report `TYPE=disk`. Still unverified against real zvols — confirm on a
-  `local-zfs` host.
+  `local-zfs` host (**FT-005**).
 - **C-014** — named constants for every `head -N` limit, consumed through
   `cap()`. The rules that came out of it are under Conventions in
   `.claude/rules/collectors.md`; T10/T11 cover them.
