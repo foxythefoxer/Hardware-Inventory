@@ -23,6 +23,14 @@ ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
+# When an exit-code assertion fails, the one useful fact is WHICH collector
+# warned — the script writes it into the report, and a bare "exit 1" throws it
+# away. That is exactly how three CI failures stayed unattributed: T8 dumped its
+# warnings block and was diagnosable from the log, T2 and T12 did not and were
+# not, on a runner nobody can log into. Every failure branch that turns on the
+# exit code calls this.
+dumpwarn() { sed -n '/^## Collection warnings/,/^_/p' "$1" | sed 's/^/        /'; }
+
 [ -r "$SCRIPT" ] || { echo "cannot read $SCRIPT"; exit 1; }
 echo "Testing: $SCRIPT"
 [ "$(id -u)" -eq 0 ] || echo "Running as $(id -un) — root-only tests will be skipped."
@@ -77,7 +85,7 @@ fi
 head_ "T2  Clean run on an ordinary host"
 
 bash "$SCRIPT" > "$TMP/clean.md" 2> "$TMP/clean.err"; RC=$?
-[ $RC -eq 0 ] && ok "exits 0" || bad "exit $RC"
+if [ $RC -eq 0 ]; then ok "exits 0"; else bad "exit $RC — a collector on this host warned:"; dumpwarn "$TMP/clean.md"; fi
 [ ! -s "$TMP/clean.err" ] && ok "stderr empty" || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/clean.err"; }
 grep -q 'End of report' "$TMP/clean.md" && ok "reaches footer" || bad "no footer"
 
@@ -212,9 +220,7 @@ for u in bash sh uname hostname date id awk gawk sed grep cat head tail wc ls \
 done
 
 PATH="$TMP/minbin" bash "$SCRIPT" > "$TMP/m.md" 2>"$TMP/m.err"; RC=$?
-[ $RC -eq 0 ] && ok "exits 0 when tools are merely absent" \
-              || { bad "exit $RC — absent tools must not warn:"; \
-                   sed -n '/^## Collection warnings/,/^_/p' "$TMP/m.md" | sed 's/^/        /'; }
+if [ $RC -eq 0 ]; then ok "exits 0 when tools are merely absent"; else bad "exit $RC — absent tools must not warn:"; dumpwarn "$TMP/m.md"; fi
 grep -q '^## Collection warnings' "$TMP/m.md" \
   && bad "absent tools produced warnings" || ok "no warnings for absent tools"
 grep -q 'End of report' "$TMP/m.md" && ok "still writes the full report" || bad "no footer"
@@ -388,9 +394,20 @@ PATH="$TMP/emptydocker:$PATH" bash "$SCRIPT" > "$TMP/ed.md" 2>"$TMP/ed.err"; RC=
 [ ! -s "$TMP/ed.err" ] && ok "stderr empty (no unbound-variable abort)" \
   || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/ed.err"; }
 grep -q 'End of report' "$TMP/ed.md" && ok "report reaches its footer" || bad "report truncated before the footer"
-[ $RC -eq 0 ] && ok "exits 0 — zero containers is healthy, not a warning" || bad "exit $RC — expected 0"
-grep -q '^## Collection warnings' "$TMP/ed.md" \
-  && bad "zero containers produced a warning" || ok "no warning for zero containers"
+if [ $RC -eq 0 ]; then
+  ok "exits 0 — zero containers is healthy, not a warning"
+else
+  bad "exit $RC — expected 0; the warnings below say which collector, and it may be an unrelated one:"
+  dumpwarn "$TMP/ed.md"
+fi
+# Note this fires on ANY warning, not only a docker one — it is coupled to
+# whatever else happens to be installed on the host running the suite. Read the
+# dump above before blaming the docker section.
+if grep -q '^## Collection warnings' "$TMP/ed.md"; then
+  bad "zero containers produced a warning"
+else
+  ok "no warning for zero containers"
+fi
 # The gate passed, so the section must still be present: a test that merely
 # checked for a complete report would also pass if Docker were skipped entirely.
 grep -q '^### Docker' "$TMP/ed.md" && ok "Docker section still emitted" || bad "Docker section missing"

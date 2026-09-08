@@ -4,6 +4,17 @@
     "hookify@claude-plugins-official": true,
     "claude-code-setup@claude-plugins-official": true
   },
+  "permissions": {
+    "allow": [
+      "Bash(bash tests/run.sh)",
+      "Bash(bash tests/run.sh *)",
+      "Bash(git -C * log *)",
+      "Bash(git -C * status *)",
+      "Bash(git -C * rev-list *)",
+      "Bash(git -C * diff *)",
+      "Bash(git -C * show *)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
