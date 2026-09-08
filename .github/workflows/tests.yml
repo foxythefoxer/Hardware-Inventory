@@ -63,6 +63,21 @@ jobs:
           bash --version | head -1
           shellcheck --version | sed -n '2,4p'
 
+      # CI-002. This is the README's fresh-clone setup step, which a runner is
+      # entitled to skip and therefore always did — leaving T14 to skip its
+      # whole matcher half on every push. The example file is committed and
+      # holds no patterns, only comments, so what runs here is the hook's
+      # BUILT-IN shapes: RFC 1918, CGNAT, MAC and OUI forms, plus the sweep of
+      # every tracked file. None of those read the private list's contents; the
+      # hook simply refuses to start without the file existing.
+      #
+      # It publishes nothing. The one thing CI cannot check is the private
+      # patterns themselves — the maintainer's name and hostnames — which is by
+      # construction: they are not in this repository, which is the point of
+      # them. That gap is real and is stated rather than papered over.
+      - name: Provide a pattern list so the leak hook can run
+        run: cp .claude/private-patterns.example .claude/private-patterns.local
+
       - name: Suite, unprivileged
         run: bash tests/run.sh
 

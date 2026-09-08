@@ -492,16 +492,51 @@ if ! command -v jq >/dev/null 2>&1; then
   printf '  \033[33mSKIP\033[0m  jq not installed\n'
 elif [ ! -r "$LHOOK" ]; then
   bad "hook missing: $LHOOK"
-elif [ ! -r "$HERE/../.claude/private-patterns.local" ]; then
-  # Not a failure: the private list is gitignored by design, so a fresh clone
-  # and CI both legitimately lack it. The hook's own refusal to run without it
-  # is asserted below, which is the half that can be checked from here.
-  printf '  \033[33mSKIP\033[0m  no private-patterns.local (expected in a fresh clone)\n'
+else
+  # CI-002. The refusal is asserted unconditionally, against a COPY of the hook
+  # in a temp tree with no pattern list beside it, so the absence is synthetic
+  # rather than a property of whoever runs the suite. It used to live in the
+  # skip branch, which meant it ran only where the list was missing — never on
+  # the maintainer's machine, and, once CI was given a list, nowhere at all.
+  # This is the hook's single most important property: refusing to run is what
+  # stops it from being present and inert.
+  mkdir -p "$TMP/inerthook/hooks"
+  cp "$LHOOK" "$TMP/inerthook/hooks/"
   printf '%s' 'x' | jq -Rs '{tool_name:"Write",tool_input:{content:.}}' \
-    | bash "$LHOOK" --hook >/dev/null 2>&1
+    | bash "$TMP/inerthook/hooks/no-estate-identity.sh" --hook >/dev/null 2>&1
   [ $? -eq 2 ] && ok "refuses to run when the private list is absent" \
                 || bad "ran without a private list — an inert hook looks like a working one"
+fi
+
+if ! command -v jq >/dev/null 2>&1 || [ ! -r "$LHOOK" ]; then
+  : # already reported above
+elif [ ! -r "$HERE/../.claude/private-patterns.local" ]; then
+  # The list is gitignored by design, so a fresh clone that has not run the
+  # README's setup step legitimately lacks it. CI now copies the example into
+  # place — see the workflow — because everything below tests the BUILT-IN
+  # shapes and the tracked-file sweep, none of which read the private list's
+  # contents. Skipping them there left the publishing rule's only enforcement
+  # unverified on every push, which is the same shape of gap as CI-001.
+  printf '  \033[33mSKIP\033[0m  no private-patterns.local (run the README setup step)\n'
 else
+  # A list that exists but holds no patterns is the one state that looks exactly
+  # like protection and is not: the hook starts, the built-in shapes run, and
+  # the names, hostnames and vault this file exists to catch are unguarded. It
+  # is also reachable by accident — an agent session in this repo overwrote the
+  # local list with the example by misfiring a `cp`, and nothing noticed, which
+  # is precisely why this check exists. In CI that state is deliberate, so it is
+  # a note there and a failure everywhere else.
+  # `grep -c` exits 1 on a count of zero, so the fallback is an assignment, not
+  # an `|| echo 0` — that appends a second line and `[` then refuses the pair.
+  PATCOUNT=$(grep -cvE '^[[:space:]]*(#|$)' "$HERE/../.claude/private-patterns.local" 2>/dev/null) || PATCOUNT=0
+  if [ "$PATCOUNT" -gt 0 ]; then
+    ok "private list holds $PATCOUNT pattern(s)"
+  elif [ -n "${CI:-}" ]; then
+    printf '  \033[33mNOTE\033[0m  private list is the example copy (0 patterns) — expected in CI\n'
+  else
+    bad "private list has 0 patterns — built-in shapes still run, but names and hostnames are NOT protected"
+  fi
+
   P1=10; P2=192.168; P3=172.20; P4=100.101      # RFC 1918 x3, then CGNAT
   # One octet per variable, the device half included. Writing the last three
   # octets together would itself be an OUI-shaped triple, and the hook rejects

@@ -517,6 +517,56 @@ drive probe and the root-gated branches have not executed in CI once, contrary t
 the workflow's own header comment claims about them. `if: ${{ !cancelled() }}` on that
 step; a failure in one pass must not hide the other's result.
 
+### CI-002 — the leak hook's own test never ran in CI — accepted, done
+
+T14 skipped its entire matcher half on every push, printing `SKIP no
+private-patterns.local (expected in a fresh clone)`. That skip was correct about
+the cause and wrong about the consequence: **the only enforcement the publishing
+rule has was unverified on every run**, which is CI-001's shape exactly — a check
+that looks present and is not running.
+
+The skip was avoidable. Everything below it tests the hook's **built-in** shapes
+— RFC 1918, CGNAT, MAC and OUI forms, the documentation ranges that must pass,
+commit-msg mode, and the sweep of every tracked file. None of them reads the
+private list's contents; the hook merely refuses to start unless the file
+exists. `.claude/private-patterns.example` is committed and holds only comments,
+so copying it into place in CI unlocks all of it and publishes nothing.
+Measured in a hook copy under a temp tree: a private-range address exits 2, RFC
+5737 exits 0, a host named by class exits 0 — identical to the maintainer's
+machine, where the list is populated.
+
+What CI still cannot check is the private patterns themselves. That is by
+construction — they are not in this repository, which is the point of them — and
+it is stated rather than papered over.
+
+**The refusal assertion moved out of the skip branch.** It ran only where the
+list was missing, so it never ran on the maintainer's machine, and once CI was
+given a list it would have run nowhere at all. It now runs unconditionally
+against a copy of the hook in a temp tree with no list beside it, so the absence
+is synthetic. Refusing to start is the hook's most important property: the file
+it needs is gitignored, so the failure it guards against — present and inert —
+is the default state of every fresh clone.
+
+**A zero-pattern list is now a failing assertion**, and this one was written from
+an incident rather than from reasoning. During this session an agent's scratch
+`git clone` failed with `Invalid cross-device link`; the `&&` chain stopped at
+the failure but the following `;`-separated `cp
+.claude/private-patterns.example .claude/private-patterns.local` did not, and it
+ran in the real working tree. The maintainer's populated list was replaced by the
+example: 2,068 bytes, 0 active patterns. Nothing detected it. Not git — the file
+is gitignored by design and has never been committed. Not the hook — it starts
+happily, and the built-in shapes still fire, so writes kept being scanned and
+kept passing. Not the suite — T14 asserted the hook's behaviour, never the list's
+contents. The contents were unrecoverable: no snapshot, no editor local history,
+no copy anywhere on disk.
+
+The lesson generalises past this repo: **a security control with a data
+dependency needs an assertion on the data, not only on the code.** The hook's own
+header says a hook that is present and inert is worse than none, and it enforces
+that for a *missing* file while an *empty* one produced exactly the state it
+warns about. The count assertion fails locally and prints a note under `CI`,
+where the example copy is deliberate.
+
 ---
 
 ## Verified reviewer claims

@@ -80,6 +80,14 @@ Verified against the file and covered by `tests/run.sh` where testable.
   broken. That one warning is why every CI run this workflow ever made was red, and why
   three assertions in T2 and T12 blamed docker and displays. T17 covers both directions.
   The root pass had never run either, being a later step in the same job; fixed with it.
+- **CI-002** — T14 skipped its whole matcher half on every CI run for want of a
+  gitignored file, leaving the publishing rule's only enforcement unverified on
+  every push. CI now copies the committed example into place; everything that
+  runs there tests built-in shapes, so it publishes nothing. The refusal
+  assertion moved out of the skip branch — it had been running only where the
+  list was missing — and a **zero-pattern list is now a failure**, written after
+  a misfired `cp` in this repo replaced the real list with the example and
+  nothing noticed.
 - **C-025 / C-026** — warning accumulator and meaningful exit code. The
   exit-code contract in `.claude/rules/collectors.md` is the operative statement
   of it.

@@ -204,11 +204,22 @@ Docker · Failed systemd units · Collection warnings (only when something faile
 ### Version
 
 `collector:` is the version a vault files the report under, and it is the only
-place the version appears in the output. It moves when the report's shape changes:
-**v5** added the Displays and UPS sections. What changed in each version is the
-*Done* list in [`docs/QUEUE.md`](docs/QUEUE.md). The version is written twice in
-the script — the header comment and that `printf` — and T1 fails if the two ever
-disagree, which is how a stale `collector:` misfiling every report gets caught.
+place the version appears in the output. **It moves when the emitted report
+changes for some class of host, and only once per state the world has seen.**
+
+**v5** is Displays, UPS, and the CI-001 PCI fix. That last one changes the report
+— on a host whose PCI devices match none of the section's classes, a section and
+a spurious warning both disappear, and the exit code goes from `1` to `0` — and
+it still did not earn v6, because no report has ever been produced by a v5
+without it. A version number describes what a consumer can be holding, not what
+the repository did; two numbers for a state nothing ever ran is noise in every
+vault that files by this field. The next behaviour change, once v5 has run
+somewhere, is v6.
+
+What changed in each version is the *Done* list in
+[`docs/QUEUE.md`](docs/QUEUE.md). The version is written twice in the script —
+the header comment and that `printf` — and T1 fails if the two ever disagree,
+which is how a stale `collector:` misfiling every report gets caught.
 
 ### Diffing two runs
 
@@ -333,6 +344,14 @@ hook that works:
 git config core.hooksPath .githooks                                 # pre-commit + commit-msg
 cp .claude/private-patterns.example .claude/private-patterns.local  # then fill it in
 ```
+
+**Run that second command once, and never again.** It overwrites the list you
+filled in, and the result — a file that exists with no patterns in it — is the
+one state that looks exactly like protection and is not: the hook starts, the
+built-in address and MAC shapes still fire, and the names and hostnames it was
+told to catch are unguarded. The file is gitignored, so git cannot get it back.
+`bash tests/run.sh` fails on an empty list for that reason (T14); CI copies the
+example in deliberately and prints a note instead.
 
 Before opening a PR:
 
