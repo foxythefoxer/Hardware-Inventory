@@ -189,6 +189,17 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
 - **Send back:** the listing (or the error, if the directory is absent — that is
   the answer for an LXC) and the four readable/not lines, per host class. Values
   are not wanted, only whether they can be read.
+- **Half answered, 2026-09-07, on the development host** (whitebox desktop, bare
+  metal, ordinary user shell — the "normal user shell on a whitebox desktop"
+  class this entry asks for, which is what this machine already is):
+  the directory exists and all four of `sys_vendor`, `product_name`,
+  `board_name`, `bios_version` are readable unprivileged, mode `0444`. But
+  `product_serial`, `board_serial`, `chassis_serial` and `product_uuid` are mode
+  `0400 root:root` and **not** readable. So the FR-004 fallback can fill model,
+  motherboard and BIOS without root, and can never fill a serial that way — the
+  serial rows stay root-gated on `dmidecode` no matter what this feature does.
+  **Still open: the unprivileged LXC half**, which is the one that decides
+  whether FR-004 needs a gate for a missing directory.
 
 ### FT-007 — the root half, on hardware that has any (standing)
 
