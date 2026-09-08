@@ -195,8 +195,9 @@ What the suite covers, and why each case is shaped the way it is:
    script must complete, reach its footer, and exit `1` — `124` means it hung,
    which is the defect class this test exists for. Do not delete it to make the
    suite faster.
-2. **T2 clean.** Zero stderr, no empty table headers, valid YAML frontmatter,
-   exit `0`.
+2. **T2 clean.** Zero stderr, no empty table headers, valid YAML frontmatter, and
+   an exit code that **agrees with the warnings block** — `rc_agrees`, not
+   `exit 0`. See the rule below; this is CI-004 and it has bitten three times.
 3. **T4/T5/T6 mock fixtures** for hardware you don't have: Unraid
    `disks.ini`/`var.ini`, `pct`/`qm` config output, and a `smartctl` answering on
    sparse `megaraid,N` IDs.
@@ -230,7 +231,16 @@ What the suite covers, and why each case is shaped the way it is:
    their block half: a matcher that refuses `zpool list` or a documentation-range
    MAC gets switched off within a day, and then nothing is enforcing anything.
    T14 also runs every tracked file through the leak matcher.
-9. `bash -n` (T1) and ShellCheck (T7). T1 also greps the script for banned verbs
+9. **Never assert a bare exit code against the live host** (CI-004). A test whose
+   stubs are *prepended* to `$PATH` leaves every other collector on the runner
+   live, so `[ $RC -eq 0 ]` asserts that machine has nothing degraded — and an
+   unprivileged `lspci` that enumerates nothing warns, correctly, and fails a
+   test about docker. Assert `rc_agrees` (a warnings block **iff** exit 1, which
+   holds anywhere and also catches warning-while-exiting-0), and assert the
+   test's own claim **by name, scoped to the warnings block**, the way T12, T15,
+   T16 and T17 do. A *controlled* exit code needs the whole `PATH` built, as
+   T8's `minbin` does. This class outlived CI-001, which fixed one cause of it.
+10. `bash -n` (T1) and ShellCheck (T7). T1 also greps the script for banned verbs
    and for `set -e`/`pipefail`, stripping comments and quoted strings first — the
    header comment deliberately names every verb the script does not use.
 
