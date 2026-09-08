@@ -15,6 +15,11 @@ Work that is *done* but proven on only one host class is not tracked here — it
 in [`FIELD-TESTS.md`](FIELD-TESTS.md), with the command to run and the answer
 wanted. The notes below name the `FT-` id where one exists.
 
+Ideas taken from other projects and **not yet adjudicated** are not tracked here
+either — they are in [`PRIOR-ART.md`](PRIOR-ART.md) with their source repository
+attached. "Nothing left in this file" therefore does not mean "nothing left to
+consider"; it means nothing left that has been agreed to.
+
 ---
 
 ## Remaining

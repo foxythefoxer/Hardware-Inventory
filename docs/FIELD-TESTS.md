@@ -227,6 +227,53 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   "No drives answered" line is present. A count above zero with that line absent
   is the pass.
 
+### FT-009 — does `emhttp` keep `id=` for a slot with no disk in it? (PA-005)
+
+- **Needs:** any Unraid host with a configured array. It does **not** need a
+  degraded array — the interesting slot is an *unassigned* one, and a host with
+  single parity already has an empty `parity2` slot if emhttp writes sections
+  for unassigned slots at all. That is half the question.
+- **Why not here:** no Unraid. The Array slots table is built by the one awk
+  block in the script, and its `emit()` returns early when `device` and `id` are
+  **both** empty. Measured on 2026-09-08 against a synthetic slot with both
+  empty: the row is dropped silently — no row, no warning, exit `0`. A host
+  whose parity disk had been kicked out would then read as a host that has no
+  parity slot, which is precisely the reading the exit-code contract exists to
+  prevent. Whether that is reachable turns on whether emhttp retains the `id=`
+  of a disk it has disabled or lost. If it does, `id != ""`, the guard passes,
+  and the row renders correctly with a `—` in the Device column — no bug, and
+  the fixture just gains a case. If it does not, the drop is real.
+  An independent parser's tests
+  ([ruaan-deysel/unraid-management-agent](https://github.com/ruaan-deysel/unraid-management-agent),
+  `daemon/services/collectors/array_test.go`) enumerate `DISK_NP`, `DISK_DSBL`
+  and `DISK_NP_DSBL` with `device=""`, but carry no `id` field either way, so
+  they do not settle it. See [`PRIOR-ART.md`](PRIOR-ART.md) PA-005.
+- **Run:**
+  ```bash
+  awk -F= '
+    /^\[/ { s=$0; gsub(/[\["\]]/,"",s); next }
+    /^(status|device|id)=/ {
+      v=$0; sub(/^[^=]*=/,"",v); gsub(/"/,"",v)
+      if ($1=="status") printf "%s status=%s\n", s, v
+      else printf "%s %s=%s\n", s, $1, (v==""?"EMPTY":"present")
+    }
+  ' /var/local/emhttp/disks.ini
+  grep -c '^\[' /var/local/emhttp/disks.ini
+  bash hw-inventory.sh > "$HOME/hw.md"; echo "exit=$?"
+  sed -n '/^#### Array slots/,/^_Slot names/p' "$HOME/hw.md" | grep -c '^| '
+  ```
+- **Run as:** one run is enough — Unraid's console is root, and nothing in this
+  section is root-gated anyway. If you happen to have a non-root shell, say
+  whether `/var/local/emhttp/disks.ini` is readable from it; that is a bonus
+  answer, not the question.
+- **Send back:** the first command's output **verbatim — it is already safe**,
+  which is why it is shaped that way: slot names are Unraid roles (`parity`,
+  `disk1`, `cache`, `flash`), status values are emhttp's own vocabulary, and
+  `device` and `id` are reduced to `EMPTY`/`present` so no serial or node name
+  leaves the host. Then the two counts and the exit code. The table count
+  includes its header row, so **sections + 1** is the pass; anything lower means
+  a slot was dropped, and the first command says which.
+
 ### FT-007 — the root half, on hardware that has any (standing)
 
 - **Needs:** any host you can `sudo` on, and ideally one with a BMC, a

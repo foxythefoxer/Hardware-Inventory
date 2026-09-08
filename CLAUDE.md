@@ -153,6 +153,7 @@ suite be the check on you.
 | Accepted work not yet done, and what's already done | [`docs/QUEUE.md`](docs/QUEUE.md) | You open it |
 | Branches only another host class can verify, and what to ask for | [`docs/FIELD-TESTS.md`](docs/FIELD-TESTS.md) | `/hw-check` phase 4, or you open it |
 | Every verdict, with its measurements | [`docs/DISPOSITIONS.md`](docs/DISPOSITIONS.md) | You open it |
+| What comparable tools do, and the leads taken from them — **unadjudicated** | [`docs/PRIOR-ART.md`](docs/PRIOR-ART.md) | You open it |
 | Recording a new verdict, and replying to the issue | `/adjudicate` | You invoke it |
 | Verifying a change before committing | `/hw-check` | You invoke it |
 | The banned-verb list · leak shapes | `.claude/hooks/` | Every matching tool call, and `git commit` |

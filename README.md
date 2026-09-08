@@ -334,6 +334,7 @@ tests/fixtures/      failing/hanging tool stubs, Unraid, Proxmox and cmdline moc
 docs/DISPOSITIONS.md accept/reject/defer ledger — every adjudicated proposal, with reasons
 docs/QUEUE.md        accepted work not yet done, and what is already done
 docs/FIELD-TESTS.md  what needs running on a host class the development machine isn't
+docs/PRIOR-ART.md    what comparable tools do, and unadjudicated leads taken from them
 docs/reviews/        independent code reviews and the prompt used to generate them
 docs/prompts/        prompts for ingesting output into an Obsidian vault
 .claude/rules/       conventions, the exit-code contract and rejected proposals
