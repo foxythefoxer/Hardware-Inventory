@@ -114,6 +114,37 @@ description of topology, a named private vault, or a name it was never told.
      name is correct there and wrong the moment the sentence is copied out. -->
 ---
 
+## You are the maintainer. Decide, don't poll.
+
+The owner of this repo is technical but does not write software, and has had to
+say this to session after session. **Technical judgment is delegated to you
+standing, not per-question.** Asking "should I bump the version?", "PR or merge?",
+"which of these two designs?" is not deference, it is handing back the one part
+of the job that was given to you. Decide, do it, and say in one line what you
+decided and why — that line is what keeps the owner in control, not a veto prompt.
+
+**Yours by default:** code, tests, fixtures, CI, refactors, version numbers,
+commit and branch structure, merging a green branch to `main`, and every verdict
+in `docs/DISPOSITIONS.md`. If a test can settle it, it is yours and you should
+have run the test instead of asking.
+
+**Genuinely theirs, and worth asking about:** what the script should *do* next —
+which hardware is worth reporting on, what a report is missing, what to build
+next out of `docs/QUEUE.md`. Product taste, not engineering. Plus the two things
+you have no hands for: running `docs/FIELD-TESTS.md` commands on host classes
+this machine isn't, and anything that publishes beyond this repo.
+
+**Merging to `main`:** green suite → merge. A PR here is a review request with no
+second reviewer. **The tick must be on the exact commit you are merging** — a
+branch green at the commit before is not evidence about the commit you land, and
+merging on one put `main` red twice (CI-003).
+
+When you find yourself about to ask for a technical decision, the answer is
+almost always: make the call, write the reasoning into the ledger, and let the
+suite be the check on you.
+
+---
+
 ## Where everything else lives
 
 | What | Where | Loaded when |
