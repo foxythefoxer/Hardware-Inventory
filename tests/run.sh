@@ -757,6 +757,35 @@ PATH="$TMP/pcibin:$PATH" bash "$SCRIPT" > "$TMP/pci2.md" 2>/dev/null; RC=$?
 grep -q 'lspci -nnk' "$TMP/pci2.md" \
   && ok "warning names lspci -nnk" || bad "no warning although -nnk returned nothing"
 
+# ----------------------------------------------------------- T18 os-release ---
+# C-005. /etc/os-release is a shell fragment by specification and the script
+# used to `.` it — executing whatever it contains, as root, on every run, from
+# a file it otherwise only reads. The fixture puts a command substitution in
+# the value, which is the difference the two implementations cannot hide:
+# sourced it collapses to `Distro SOURCED`, parsed it stays literal text. Both
+# directions are asserted, because "the value is there" passes either way.
+head_ "T18  /etc/os-release is parsed, not executed"
+
+cat > "$TMP/os-release" << 'OSEOF'
+PRETTY_NAME="Distro $(echo SOURCED)"
+ID=fixtureos
+ID_LIKE=debian
+VERSION_ID="42"
+OSEOF
+
+sed -e "s#/etc/os-release#$TMP/os-release#g" "$SCRIPT" > "$TMP/osr.sh"
+bash "$TMP/osr.sh" > "$TMP/osr.md" 2>/dev/null
+
+grep -qE '^os: "Distro SOURCED"' "$TMP/osr.md" \
+  && bad "os-release was EXECUTED — the substitution in PRETTY_NAME ran" \
+  || ok "os-release value not executed"
+grep -qF 'Distro $(echo SOURCED)' "$TMP/osr.md" \
+  && ok "PRETTY_NAME read as literal text" || bad "PRETTY_NAME not read at all"
+# `^ID=` must not match ID_LIKE or VERSION_ID — the one way a line-prefix parse
+# goes wrong that sourcing never could.
+grep -q '^os_id: "fixtureos"' "$TMP/osr.md" \
+  && ok "ID read, ID_LIKE and VERSION_ID not mistaken for it" || bad "os_id wrong"
+
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -195,10 +195,15 @@ is_root() { [ "$(id -u)" -eq 0 ]; }
 HOST=$(hostname 2>/dev/null || echo unknown)
 
 OSNAME=""; OSID=""
+# /etc/os-release is a shell fragment by specification, and sourcing it would
+# EXECUTE it — as root, on every run, from a file this script otherwise only
+# reads (C-005). Parsed as KEY=value instead, quotes stripped: `^KEY=` cannot
+# match ID_LIKE or VERSION_ID, and a `$(...)` in a value stays literal text.
+osr() { sed -n "s/^$1=//p" /etc/os-release 2>/dev/null | head -1 | sed 's/^["'\'']//;s/["'\'']$//'; }
 if [ -r /etc/os-release ]; then
-  # shellcheck disable=SC1091
-  OSNAME=$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-${NAME:-}}")
-  OSID=$(. /etc/os-release 2>/dev/null && echo "${ID:-}")
+  OSNAME=$(osr PRETTY_NAME)
+  [ -z "$OSNAME" ] && OSNAME=$(osr NAME)
+  OSID=$(osr ID)
 fi
 if [ -z "$OSNAME" ] && [ -r /etc/unraid-version ]; then
   OSNAME="Unraid $(sed 's/.*=//;s/"//g' /etc/unraid-version 2>/dev/null)"
