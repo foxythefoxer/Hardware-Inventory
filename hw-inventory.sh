@@ -239,13 +239,24 @@ SERIAL=$(dmi system-serial-number)
 BOARD=$(dmi baseboard-product-name)
 BIOS=$(dmi bios-version)
 
-# Disks, used by both the inventory table and the SMART table.
+# Disks, used by the device table, the SMART table and the megaraid probe.
+# One lsblk for all three (A-007). The -P (key="value") form is used
+# deliberately: plain columnar output collapses empty MODEL/SERIAL fields and
+# silently shifts every later column — and it already carries everything the
+# name list needs, plus the TRAN the megaraid probe picks its target by.
+#
+# zvols are excluded by NAME, not by TYPE: a ZFS zvol reports TYPE="disk", so
+# the type filter alone leaves every VM disk on a local-zfs host as a phantom
+# /dev/zdN row drawing its own wasted smartctl probe (C-012).
 DISKS=""
 LSBLK_RAW=""
+LSBLK_DISKS=""
 if have lsblk; then
-  LSBLK_RAW=$("${TMO[@]}" lsblk -dn -o NAME,TYPE 2>/dev/null || true)
-  DISKS=$(printf '%s\n' "$LSBLK_RAW" \
-    | awk '$2=="disk"{print $1}' | grep -Ev '^(loop|ram|zram|sr|zd[0-9])' || true)
+  LSBLK_RAW=$("${TMO[@]}" lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null || true)
+  LSBLK_DISKS=$(printf '%s\n' "$LSBLK_RAW" \
+    | grep -Ev 'NAME="(loop|ram|zram|sr)[0-9]*"|NAME="zd[0-9][0-9]*"' \
+    | grep -F 'TYPE="disk"' || true)
+  DISKS=$(printf '%s\n' "$LSBLK_DISKS" | sed -n 's/^NAME="\([^"]*\)".*/\1/p')
   # lsblk returning nothing at all means the query failed. A host with zero
   # block devices is not a real case; an empty DISKS after a successful lsblk
   # (all devices filtered as zvols/loop) is, so only the raw form is checked.
@@ -426,15 +437,11 @@ fi
 # ---------------------------------------------------------------- STORAGE ---
 printf '### Storage — physical devices\n\n'
 if have lsblk; then
-  # -P (key="value") is used deliberately: plain columnar output collapses
-  # empty MODEL/SERIAL fields and silently shifts every later column.
   fld() { printf '%s' "$2" | sed -n "s/.*[[:space:]]\{0,\}$1=\"\([^\"]*\)\".*/\1/p"; }
   # Captured rather than printed straight through: the row loop is a pipeline
   # body, so it cannot warn() from inside (G-002). Testing the captured rows
   # out here also keeps the header from being printed above nothing.
-  DEVROWS=$("${TMO[@]}" lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null \
-    | grep -Ev 'NAME="(loop|ram|zram|sr)[0-9]*"|NAME="zd[0-9][0-9]*"' \
-    | grep -F 'TYPE="disk"' \
+  DEVROWS=$(printf '%s\n' "$LSBLK_DISKS" \
     | while IFS= read -r line; do
         name=$(fld NAME "$line");   [ -z "$name" ] && continue
         size=$(fld SIZE "$line");   rota=$(fld ROTA "$line")
@@ -567,11 +574,17 @@ if [ -n "$RAIDCTL" ]; then
   # Per-drive SMART behind the controller. The controller hides drives from
   # normal addressing, so each is queried by its controller device ID.
   if is_root && have smartctl; then
-    MRTGT=""
-    for d in $DISKS; do
-      case "$d" in nvme*) continue;; esac
-      MRTGT="$d"; break
-    done
+    # The probe needs one device node that routes THROUGH the controller;
+    # `-d megaraid,N` then addresses each drive behind it by controller ID.
+    # The first non-NVMe disk is not that node on Unraid, where it is the USB
+    # boot key (C-016) — probing it answers for no ID at all and the section
+    # reports "no drives answered" on a host whose array is right there. USB
+    # and NVMe are excluded by TRAN, and NVMe also by name because older
+    # util-linux leaves TRAN empty for it. An otherwise empty TRAN stays
+    # eligible: controller-backed disks routinely report none.
+    MRTGT=$(printf '%s\n' "$LSBLK_DISKS" \
+      | grep -Ev 'NAME="nvme|TRAN="(usb|nvme)"' \
+      | sed -n 's/^NAME="\([^"]*\)".*/\1/p' | head -1)
     if [ -n "$MRTGT" ]; then
       MRROWS=""; misses=0
       for n in {0..31}; do

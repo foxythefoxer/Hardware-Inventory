@@ -163,6 +163,13 @@ head_ "T6  PERC / MegaRAID with sparse device IDs"
 PATH="$FIX/percbin:$PATH" bash "$SCRIPT" > "$TMP/r.md" 2>/dev/null
 grep -q 'PERC H310' "$TMP/r.md" && ok "controller detected" || bad "controller not detected"
 
+# A-007: the device table and the disk list now come from one lsblk -P capture,
+# so this row failing means the hoist dropped a field or a filter.
+grep -q '^| /dev/sdb | 3.6T | FIXTURE-DISK-A |' "$TMP/r.md" \
+  && ok "device table built from the single lsblk -P capture" || bad "device row missing or columns shifted"
+grep -q '/dev/zd0' "$TMP/r.md" \
+  && bad "ZFS zvol (TYPE=disk) survived the name exclusion" || ok "zvol excluded from the device table"
+
 # The script only probes SMART as root, by design. Without root there is
 # nothing to assert here, so skip rather than report a false failure.
 if [ "$(id -u)" -ne 0 ]; then
@@ -172,6 +179,14 @@ else
     grep -q "megaraid,$n" "$TMP/r.md" && ok "drive at sparse ID $n found" || bad "drive at ID $n missed"
   done
   grep -q 'megaraid,20' "$TMP/r.md" && bad "probe ran past the miss threshold" || ok "probe stopped after miss threshold"
+  # C-016. The fixture lists an NVMe disk, then the USB boot key, then the one
+  # disk behind the controller; the stub reports back which node it was asked
+  # about. Skipping `nvme*` by name alone lands on the boot key, which is the
+  # finding — so both directions are asserted, not just the row count.
+  grep -q 'PROBED-VIA-sdb' "$TMP/r.md" \
+    && ok "probe targets a controller-attached disk" || bad "probe did not target sdb"
+  grep -q 'PROBED-VIA-sda' "$TMP/r.md" \
+    && bad "probe targeted the USB boot key — C-016 is back" || ok "USB boot key rejected as probe target"
 fi
 
 # ----------------------------------------------------------- T7 shellcheck ---

@@ -1,21 +1,18 @@
 #!/bin/bash
-# T6 asserts the `-d megaraid,N` probe, and that probe is gated on $DISKS
-# holding at least one non-nvme name — MRTGT is picked by skipping nvme* and
-# taking the first survivor. Without this stub $DISKS came from the RUNNER's
-# real lsblk, so the test passed only on a machine that happened to have a
-# non-NVMe disk. GitHub's fleet is mixed at the same image version: some SKUs
-# expose sda, some only nvme0n1, and on the latter MRTGT was empty, the probe
-# never ran, and all four sparse-ID assertions failed while looking like a
-# parsing bug. The controller fixture is mocked; the disk it hangs off has to
-# be too, or the test is a coin flip on the hardware underneath the runner.
+# The Unraid-shaped disk layout C-016 is about: the first non-NVMe disk is the
+# USB boot key, not a disk that routes through the RAID controller. Targeting
+# it makes `-d megaraid,N` answer for nothing on a host whose array is fine.
 #
-# Both call sites are answered: the plain form feeds $DISKS/MRTGT, the -P form
-# feeds the device table, and leaving -P unhandled trips the "none survived the
-# physical-disk filter" warning on a run where nothing is actually wrong.
-for a in "$@"; do
-  case "$a" in
-    -*P*) echo 'NAME="sda" TYPE="disk" SIZE="3.6T" ROTA="1" TRAN="sata" MODEL="ST4000NM0033-9ZM170" SERIAL="Z1Z8ABC0"'
-          exit 0 ;;
-  esac
-done
-printf 'sda     disk\n'
+# nvme0n1 comes first on purpose — it is excluded by both name and TRAN, so a
+# probe that only skips `nvme*` still lands on the boot key, which is exactly
+# what it used to do. zd0 is a ZFS zvol: TYPE="disk", excluded by name (C-012).
+#
+# Serials are invented, and named as such. One lsblk answer serves every call
+# site since A-007 hoisted them into a single -P capture.
+cat <<'L'
+NAME="nvme0n1" TYPE="disk" SIZE="1.8T" ROTA="0" TRAN="nvme" MODEL="FIXTURE-NVME" SERIAL="FIXTURE-NVME-0001"
+NAME="sda" TYPE="disk" SIZE="14.6G" ROTA="1" TRAN="usb" MODEL="FIXTURE-BOOT-KEY" SERIAL="FIXTURE-USB-0001"
+NAME="sdb" TYPE="disk" SIZE="3.6T" ROTA="1" TRAN="sata" MODEL="FIXTURE-DISK-A" SERIAL="FIXTURE-SATA-0001"
+NAME="zd0" TYPE="disk" SIZE="32G" ROTA="1" TRAN="" MODEL="" SERIAL=""
+NAME="loop0" TYPE="loop" SIZE="4G" ROTA="1" TRAN="" MODEL="" SERIAL=""
+L
