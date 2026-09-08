@@ -221,6 +221,24 @@ What changed in each version is the *Done* list in
 the header comment and that `printf` — and T1 fails if the two ever disagree,
 which is how a stale `collector:` misfiling every report gets caught.
 
+**Every version is also a git tag, and a tag never moves.** `v5` points at the
+commit that minted it and keeps pointing there after `main` has moved on. A
+change that alters the report earns `v6` and its own tag, never a re-cut `v5` —
+a host that already fetched would go on running the old one and say `v5` either
+way. Docs, tests and hooks change under a tag without minting one; the collector
+is what the tag is for.
+
+Pin a sweep so a month of reports cannot straddle a bump:
+
+```bash
+git -C /opt/hw-inventory fetch --tags
+git -C /opt/hw-inventory checkout v5     # detached HEAD, deliberately
+sudo bash /opt/hw-inventory/hw-inventory.sh > "$(hostname)-$(date +%F).md"
+```
+
+`git -C /opt/hw-inventory describe --tags` says what a host will run before the
+sweep starts; `collector:` in the report says what it ran.
+
 ### Diffing two runs
 
 Volatile fields are grouped under `### Snapshot` so they can be excluded:
