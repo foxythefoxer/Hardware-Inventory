@@ -19,25 +19,16 @@ wanted. The notes below name the `FT-` id where one exists.
 
 ## Remaining
 
-- **C-016** — the megaraid probe targets the first non-NVMe disk, which on Unraid
-  is often the USB boot device.
-- **C-004** (LOW) — escape `|` in Markdown table cells. Most pipe-bearing output
-  already sits inside code fences.
-- **C-005** — `/etc/os-release` is sourced, which executes it as root.
 - **FR-004** — fill manufacturer/model/motherboard/BIOS from
   `/sys/devices/virtual/dmi/id/` when `dmidecode` is absent or unprivileged;
   those files are world-readable while serials are not. Today an unprivileged run
   emits `model: null` with the value sitting in a readable file. Accepted with
   binding conditions.
 
-- **A-007** — hoist the `lsblk -P` call and derive `DISKS` from it. Deferred into
-  C-016, which changes that same path; doing them separately means the same
-  reasoning twice.
-- **A-008** — capture `free -h` and `lscpu` once instead of re-invoking them six
-  times between them. Same shape as the `DMIMEM` capture already in the file.
-- **A-009** — micro-simplifications as one batch: the `CNAMES_TRUNCATED`
-  bookkeeping, `cap()`'s `total`, and `$(<file)`/`$EUID`/`${f##*/}` for six
-  forks. Cleanup, not correctness — every site works today.
+**FR-004 is the only item left, and what blocks it is an answer, not effort.**
+FT-006 wants the unprivileged-LXC half before the code is written; the
+whitebox-desktop half was answered on this machine on 2026-09-07. Everything
+else accepted has been implemented — v6, below.
 
 **Read the ledger entry before implementing any of these FRs.** FR-004 is the
 one left; the note below applies to it, and applied to FR-001 and FR-002 when
@@ -57,6 +48,27 @@ not after.
 
 Verified against the file and covered by `tests/run.sh` where testable.
 
+- **C-005** — `/etc/os-release` parsed as `KEY=value` instead of sourced, which
+  executed it as root on every run. T18 turns on a command substitution in
+  `PRETTY_NAME`: sourced it collapses, parsed it stays literal.
+- **C-016 + A-007** — one `lsblk -P` capture feeds the device table, the disk
+  list and the megaraid probe, and that probe now picks its target by `TRAN`,
+  excluding `usb` and `nvme` — on Unraid the first non-NVMe disk is the USB boot
+  key, and probing it reports "no drives answered" on a host whose array is
+  fine. T6's fixture is that layout and its smartctl stub names the node it was
+  asked about; the root half of it only runs under `sudo` or in CI.
+- **C-004** — `|` escaped in every table cell, through one `row()` helper that
+  `kv()` also calls, plus an `esc()` in the one table built in awk. The
+  container-networks table is exempt on purpose: `|` is its own field separator
+  there. T4 and T6 assert the escape and the resulting cell count.
+- **A-008** — `lscpu` and `free -h` captured once at the gather stage and parsed
+  from text six times. Report byte-identical on this host.
+- **A-009** — the micro-simplification batch, five of six. The three
+  `cat /sys/class/net/…` reads in the interface loop stayed as `cat`: bash
+  reports a missing file in `$(<file)` on its own stderr and `2>/dev/null`
+  inside the substitution does not suppress it, so an interface class with no
+  `speed` attribute would fail T2's empty-stderr assertion elsewhere. Measured;
+  the reason is in a comment at the site and in the ledger.
 - **FR-001** — display detection from `/sys/class/drm/card*-*/edid`, with
   `edid-decode` where installed and `strings` over the same bytes where it is
   not. All four binding conditions are held by T15, one assertion each. The

@@ -201,6 +201,32 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   **Still open: the unprivileged LXC half**, which is the one that decides
   whether FR-004 needs a gate for a missing directory.
 
+### FT-008 — the megaraid probe target, on a host with a controller (C-016)
+
+- **Needs:** a host with a PERC/MegaRAID controller and drives behind it. An
+  Unraid host is the ideal one, because its USB boot key is the device the fix
+  is about; any host whose first non-NVMe disk is a USB stick will do.
+- **Why not here:** no RAID controller and no Unraid. The probe now picks its
+  target by `TRAN`, skipping `usb` and `nvme`, and that choice has only ever run
+  against a fixture that says what it was asked about. What a fixture cannot
+  tell you is what `lsblk` reports for a real controller-attached drive — if
+  those come back with `TRAN="usb"` on some enclosure, the filter would skip the
+  one disk it needs.
+- **Run:**
+  ```bash
+  lsblk -dn -P -o NAME,TYPE,TRAN
+  sudo bash hw-inventory.sh > "$HOME/hw-root.md"; echo "exit=$?"
+  grep -c '^| megaraid,' "$HOME/hw-root.md"
+  grep -c 'No drives answered' "$HOME/hw-root.md"
+  ```
+- **Run as:** **root for the script** — the probe is root-gated and an
+  unprivileged run skips it entirely, so a non-root answer says nothing. The
+  `lsblk` line needs no privilege.
+- **Send back:** the `TRAN` values only (`NAME` is not wanted — "one usb, three
+  sas, one nvme" is the whole answer), the megaraid row count, and whether the
+  "No drives answered" line is present. A count above zero with that line absent
+  is the pass.
+
 ### FT-007 — the root half, on hardware that has any (standing)
 
 - **Needs:** any host you can `sudo` on, and ideally one with a BMC, a

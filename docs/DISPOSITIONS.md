@@ -107,11 +107,11 @@ check: extract every `` `xxxxxxx` `` from this file and `git cat-file -e` each o
 | C-020 | `racadm` block not root-gated and has no `###` heading; output lands under the previous section. | **Done — `8a18d7d`.** Verified. Maintainer's bug. Gated on `is_root` and given its own `###` heading. |
 | C-023 | N+1: up to 100 serial `docker inspect` calls. | **Done — `d503c78`.** One call over all containers, using `{{.Name}}` to map results back since docker applies the template once per object in argument order. No test coverage for this path; verified by hand against a stub docker. |
 | C-009 | `/proc/cmdline` emitted verbatim; may carry `rd.luks.key` or iSCSI credentials. | **Done — `61ba374`, completed in `77d3b69`.** Genuine gap in an otherwise deliberate redaction policy. `61ba374` redacted by parameter **name** (`password`, `secret`, `token`, `key`; `rd.luks.key` falls out of the generic `key` match) — which covered only half of what this very finding names. The iSCSI credentials it also lists live *inside* a value, under the innocuous name `netroot`, so no name match could ever see them; `77d3b69` added a value pass replacing everything between `iscsi:` and `@`, CHAP usernames included, keeping host, port, LUN and target. Covered by T9, verified to fail without the fix. Names are kept throughout. Still a filter, not a proof. |
-| C-004 | Markdown table cells unescaped; a literal `\|` corrupts the table. | **Accepted, downgraded to LOW.** Most pipe-bearing output already sits inside code fences. Narrow exposure, cheap fix. |
+| C-004 | Markdown table cells unescaped; a literal `\|` corrupts the table. | **Done — `0abf454`.** Downgraded to LOW when accepted: most pipe-bearing output already sits inside code fences, and the cells that can carry one are the free text — an lsblk MODEL, a VM disk list, an Unraid status string. Fixed once rather than at each site: a `row()` helper takes one argument per cell and escapes each, and `kv()` is a two-cell call to it. The Unraid slot table is built in awk and escapes where values are read (`esc()`); its inner `row()` became `emit()` so the two are not confused. One deliberate exception, commented at the site: the container-networks table parses on `\|` itself, so a cell holding one drops the row rather than mangling it. Covered by T4 and T6, both asserting the escape *and* the resulting cell count, and verified to fail with the escaping removed. |
 | C-011 | A DIMM with no Part Number line is dropped from the table but still counted in the slot total. | **Done — `39269ce`.** Rows are emitted at the record boundary rather than on the `Part Number:` line, so every populated slot appears. Verified against a synthetic `dmidecode -t memory` fixture. |
 | C-001 | No `LC_ALL=C`. | **Done — `4774e17`.** Verified harmless to the em-dash sentinel and awk `%.2f`. |
-| C-005 | Sourcing `/etc/os-release` executes it as root. | **Accepted.** Was already known; good that it resurfaced independently. |
-| C-016 | MegaRAID probe targets the first non-NVMe disk, which on Unraid is often the USB boot device. | **Accepted, LOW.** |
+| C-005 | Sourcing `/etc/os-release` executes it as root. | **Done — `37d38aa`.** Was already known; good that it resurfaced independently. The file is a shell fragment by specification, so `.` on it ran whatever it contained, as root, on every run, from a path this script otherwise only reads — the same class of hole that sank FR-003's `fastfetch`, in the script's own source rather than a dependency's config. Parsed as `KEY=value` with quotes stripped; `^KEY=` cannot match `ID_LIKE` or `VERSION_ID`, which is the one way a prefix parse goes wrong that sourcing never could, so T18 asserts that too. T18's fixture puts a command substitution in `PRETTY_NAME`: sourced it collapses, parsed it stays literal. Verified against the pre-fix script, which collapses it. |
+| C-016 | MegaRAID probe targets the first non-NVMe disk, which on Unraid is often the USB boot device. | **Done — `0da5ab9`**, with A-007 in the same commit as that deferral required. LOW, but it is a wrong *answer*, not a missing one: `-d megaraid,N` against a USB stick answers for no ID, so the section says "no drives answered — the controller may be in HBA/IT mode" on a host whose array is right there. The target is now chosen by `TRAN`, excluding `usb` and `nvme`, and `nvme` by name as well because older util-linux leaves `TRAN` empty for it; an otherwise empty `TRAN` stays eligible, since controller-backed disks routinely report none. T6's fixture is that layout — NVMe, boot key, controller disk — and the smartctl stub reports which node it was asked about, so the report shows the target. Reverting only the selection puts `PROBED-VIA-sda` in the table; verified with `is_root` simulated, no session here having sudo. |
 | G-002 | Pipeline bodies run in subshells; variable mutations would be lost. | **Done — `b3872ff`, documented in `52dff02`.** No longer theoretical: the warning accumulator is global state, so a `warn` inside a pipeline body would be silently lost. The storage and network row loops now capture their pipeline and test it outside; the rule is recorded in CLAUDE.md and at the `warn()` definition. |
 | G, edge cases | Megaraid probe can skip drives at sparse IDs beyond the 10-miss threshold. | **Accepted as a documented tradeoff, not a bug.** Deliberate bound against a 32-iteration worst case. |
 
@@ -429,7 +429,7 @@ history has been the class T3 catches. Trading 19 inert files for generated ones
 the load-bearing test to change no behaviour. Harmless in isolation; not worth doing on
 its own. Bundle it with a change that already has reason to be in `run.sh`.
 
-### A-007 — hoist the `lsblk -P` call and derive `DISKS` from it — deferred
+### A-007 — hoist the `lsblk -P` call and derive `DISKS` from it — accepted, done
 
 Real: two `lsblk` invocations with equivalent exclusion filters, and the `-P` form
 already carries everything `DISKS` needs. Deferred because it collides with **C-016**,
@@ -438,7 +438,14 @@ walking `DISKS`, and C-016 is the finding that this picks the USB boot device on
 Refactoring the producer while its one problematic consumer is queued for change means
 doing the same reasoning twice. **Do it as part of C-016 or not at all.**
 
-### A-008 — capture `free -h` and `lscpu` once instead of re-invoking — accepted
+**Done — `0da5ab9`, as part of C-016**, which is what the deferral asked for and the
+reason it was right: the hoist is what *supplies* the fix. The probe needs the `TRAN`
+column to tell a controller-attached disk from a USB boot key, and after the hoist that
+column is already in hand — done separately, C-016 would have had to add a third `lsblk`
+call or re-derive the same filter. The `TYPE`/`zd`/`loop` exclusions now exist once,
+which is also where C-012's zvol exclusion had been duplicated.
+
+### A-008 — capture `free -h` and `lscpu` once instead of re-invoking — accepted, done
 
 Four `free -h` and two `lscpu` invocations, each re-parsed from scratch. Straightforward,
 and the precedent is in the file: `DMIMEM` is captured once for exactly this reason, with
@@ -446,7 +453,14 @@ a comment saying the three parses that follow used to re-run `dmidecode` each. S
 same fix. Not urgent — this is a one-shot reporter and the cost is a few forks, not a
 hot loop. Queued in `CLAUDE.md`.
 
-### A-009 — micro-simplifications, as one batch — accepted, low priority
+**Done — `3b07754`.** Both captures sit at the gather stage, where the frontmatter
+already needed a field from each, and every later site parses that text. The two
+warnings keep their meaning — `lscpu` present and empty still warns at the CPU section,
+`free` present with no `Mem:` line still warns at the top — and T8's failing-tool half
+covers both. The report came out byte-identical to the previous commit's on this host,
+which is the whole claim a refactor like this makes.
+
+### A-009 — micro-simplifications, as one batch — accepted, done
 
 Three proposals of one shape, worth doing together or not at all:
 
@@ -460,6 +474,21 @@ Three proposals of one shape, worth doing together or not at all:
   `${f##*/}`. Bash-only, which line 1 already declares — the same argument G-001 settled.
 
 Accepted as cleanup, explicitly **not** as correctness. Each site works today.
+
+**Done — `e5a088c`, five of six.** The comparison, `cap()`'s `total`, `$EUID`,
+`${f##*/}` and the three *guarded* sysfs reads under the kernel-parameters table all
+went in. T4's share row now asserts the share name as well as the policy, because a
+parameter expansion that forgets the `%.cfg` strip looks identical to one that doesn't.
+
+**The three `cat /sys/class/net/…` reads in the interface loop stay as they are**, and
+this is the part of A-009 that was wrong on paper. Measured both ways: bash reports a
+missing file in `$(<file)` on its own stderr, and a `2>/dev/null` *inside* the
+substitution does not suppress it (an unreadable-but-present file, such as a `speed`
+attribute returning `EINVAL`, is silent — it is the missing file that is loud). Those
+paths are built from an interface name discovered at runtime, so one interface class
+without a `speed` attribute would fail T2's empty-stderr assertion on someone else's
+host, to save three forks in a one-shot reporter. The reason is in a comment at the
+site, since the next reader of this list will otherwise "finish" the batch.
 
 ---
 
