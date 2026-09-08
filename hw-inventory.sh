@@ -127,10 +127,8 @@ cap() {
   local out
   out=$(head -n "$((n + 1))")
   [ -z "$out" ] && return
-  local total
-  total=$(printf '%s\n' "$out" | wc -l)
   printf '%s\n' "$out" | head -n "$n"
-  if [ "$total" -gt "$n" ]; then
+  if [ "$(printf '%s\n' "$out" | wc -l)" -gt "$n" ]; then
     printf -- '--- truncated at %d %s ---\n' "$n" "$noun"
   fi
 }
@@ -187,7 +185,7 @@ dmi() {
   "${TMO[@]}" dmidecode -s "$1" 2>/dev/null | grep -v '^#' | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-is_root() { [ "$(id -u)" -eq 0 ]; }
+is_root() { [ "$EUID" -eq 0 ]; }
 
 # =========================================================== gather first ===
 # Frontmatter needs these before anything is printed.
@@ -359,12 +357,12 @@ else
   kv "IOMMU groups" "not active"
 fi
 if [ -r /sys/module/kvm_amd/parameters/nested ]; then
-  kv "Nested virt (kvm_amd)" "$(cat /sys/module/kvm_amd/parameters/nested 2>/dev/null)"
+  kv "Nested virt (kvm_amd)" "$(</sys/module/kvm_amd/parameters/nested)"
 elif [ -r /sys/module/kvm_intel/parameters/nested ]; then
-  kv "Nested virt (kvm_intel)" "$(cat /sys/module/kvm_intel/parameters/nested 2>/dev/null)"
+  kv "Nested virt (kvm_intel)" "$(</sys/module/kvm_intel/parameters/nested)"
 fi
 if [ -r /sys/kernel/mm/transparent_hugepage/enabled ]; then
-  kv "Transparent hugepages" "$(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null)"
+  kv "Transparent hugepages" "$(</sys/kernel/mm/transparent_hugepage/enabled)"
 fi
 echo
 if [ -r /proc/cmdline ]; then
@@ -691,7 +689,7 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
   if [ -d /boot/config/shares ]; then
     USHARES=$(for f in /boot/config/shares/*.cfg; do
       [ -r "$f" ] || continue
-      n=$(basename "$f" .cfg)
+      n=${f##*/}; n=${n%.cfg}
       g() { awk -F= -v k="$1" '$1==k{gsub(/"/,"",$2); print $2; exit}' "$f" 2>/dev/null; }
       printf '| %s | %s | %s | %s | %s |\n' \
         "$n" "$(g shareUseCache)" "$(g shareCachePool)" \
@@ -762,6 +760,13 @@ else
   # pipeline body and cannot warn() from inside it.
   IFROWS=$("${TMO[@]}" ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | while read -r ifc; do
     [ "$ifc" = "lo" ] && continue
+    # `cat`, not `$(<file)`, deliberately — the three sysfs reads above the
+    # kernel-parameters table were converted (A-009) and these three were not.
+    # Here the path is built from a name discovered at runtime, and bash
+    # reports a missing file in `$(<file)` on ITS OWN stderr, which a
+    # `2>/dev/null` inside the substitution does not suppress (measured). One
+    # interface class without a `speed` attribute would then break T2's
+    # empty-stderr assertion on someone else's host, to save three forks.
     state=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "$NA")
     mac=$(cat "/sys/class/net/$ifc/address" 2>/dev/null || echo "$NA")
     addrs=$("${TMO[@]}" ip -o -4 addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | paste -sd', ' -)
@@ -1094,11 +1099,11 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
   # networks table, where it can no longer land inside anyone's argument list.
   CNAMES_ALL=$("${TMO[@]}" docker ps -a --format '{{.Names}}' 2>/dev/null)
   CNAMES=$(printf '%s\n' "$CNAMES_ALL" | head -n "$DOCKER_LIST_LIMIT")
+  # Below the limit the two are byte-identical — command substitution strips
+  # trailing newlines from both sides — and above it one is a strict prefix of
+  # the other, so comparing them is the whole truncation test.
   CNAMES_TRUNCATED=0
-  if [ -n "$CNAMES_ALL" ]; then
-    CNAMES_TOTAL=$(printf '%s\n' "$CNAMES_ALL" | wc -l)
-    [ "$CNAMES_TOTAL" -gt "$DOCKER_LIST_LIMIT" ] && CNAMES_TRUNCATED=1
-  fi
+  [ "$CNAMES" = "$CNAMES_ALL" ] || CNAMES_TRUNCATED=1
   # Initialised before the guard because the emptiness test below sits outside
   # it: a daemon that answers `docker info` with zero containers is a healthy
   # state, but it leaves CNAMES empty, and an unset DNET then aborts the whole

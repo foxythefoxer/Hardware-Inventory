@@ -145,7 +145,12 @@ done
 grep -q '7.28 TB' "$TMP/u.md" && ok "KB->TB conversion correct" || bad "size conversion wrong"
 grep -q '78% used' "$TMP/u.md" && ok "fill percentage correct" || bad "fill percentage wrong"
 grep -q 'STARTED' "$TMP/u.md" && ok "array state read" || bad "array state missing"
-grep -q 'prefer' "$TMP/u.md" && ok "share cache policy read" || bad "share policy missing"
+# The share name is the .cfg filename with its suffix stripped, so this row
+# asserts the policy read AND the name derivation (A-009 replaced a basename
+# call with parameter expansion, which is exactly the kind of edit that looks
+# free and quietly drops the suffix).
+grep -q '^| appdata | prefer |' "$TMP/u.md" && ok "share row: name from filename, cache policy read" \
+  || bad "share row wrong — name derivation or cache policy"
 
 # -------------------------------------------------------------- T5 proxmox ---
 head_ "T5  Proxmox LXC and VM parsing"
