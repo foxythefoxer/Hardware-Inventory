@@ -668,6 +668,60 @@ PATH="$TMP/minbin" bash "$TMP/noups.sh" > "$TMP/noups.md" 2>/dev/null
 grep -q '^### UPS' "$TMP/noups.md" \
   && bad "UPS section printed with no UPS present" || ok "silent when no UPS is detected"
 
+# ------------------------------------------------------------------ T17 PCI --
+# CI-001. This reproduces a host class no machine here is: a VM whose NIC and
+# disks are paravirtual, so `lspci -nnk` prints a full listing that matches none
+# of the section's device-class keywords. That is absent hardware, which the
+# contract says is silent — but the warning was gated on the FILTERED output, so
+# the script called the host broken and exited 1. Every CI run this workflow has
+# ever made was red for that reason, and the failures landed on T2 and T12,
+# which look like docker and displays problems and are not.
+head_ "T17  PCI section on a host with no matching devices"
+
+mkdir -p "$TMP/pcibin"
+cat > "$TMP/pcibin/lspci" << 'PCIEOF'
+#!/bin/sh
+# A Hyper-V/KVM-shaped guest: bridges and a PIIX4 only. Nothing in this listing
+# matches vga|ethernet|raid|sata|non-volatile|serial attached, which is the
+# whole point — the bus enumerated fine, the host simply has none of them.
+cat << 'INNER'
+00:00.0 Host bridge [0600]: Intel Corporation 440BX/ZX/DX [8086:7192]
+00:07.0 ISA bridge [0601]: Intel Corporation 82371AB/EB/MB PIIX4 ISA [8086:7110]
+00:07.3 Bridge [0680]: Intel Corporation 82371AB/EB/MB PIIX4 ACPI [8086:7113]
+INNER
+PCIEOF
+chmod +x "$TMP/pcibin/lspci"
+
+PATH="$TMP/pcibin:$PATH" bash "$SCRIPT" > "$TMP/pci.md" 2>/dev/null; RC=$?
+if [ $RC -eq 0 ]; then
+  ok "exits 0 — no matching PCI devices is absent hardware, not a failure"
+else
+  bad "exit $RC — a filtered-empty PCI list must not warn:"; dumpwarn "$TMP/pci.md"
+fi
+grep -q 'lspci -nnk' "$TMP/pci.md" \
+  && bad "warned about lspci -nnk although it returned a full listing" \
+  || ok "no lspci warning when the filter simply matched nothing"
+# Section-output convention: no bare heading, and no empty code fence either —
+# the fence is why T2's empty-table-header check never caught this.
+grep -q '^### Notable PCI devices' "$TMP/pci.md" \
+  && bad "PCI section emitted with no devices to list" || ok "PCI section omitted, not left empty"
+
+# The other direction, and the reason the warning exists at all: plain `lspci`
+# answers, `-nnk` does not. That IS a present-and-permitted tool returning
+# nothing, so it must warn and exit 1. Without this half, deleting the warning
+# outright would pass the test above.
+cat > "$TMP/pcibin/lspci" << 'PCIEOF'
+#!/bin/sh
+for a in "$@"; do case "$a" in -*k*) exit 0 ;; esac; done
+echo "00:1f.6 Ethernet controller [0200]: Intel Corporation I219-V [8086:15b8]"
+PCIEOF
+chmod +x "$TMP/pcibin/lspci"
+
+PATH="$TMP/pcibin:$PATH" bash "$SCRIPT" > "$TMP/pci2.md" 2>/dev/null; RC=$?
+[ $RC -eq 1 ] && ok "exits 1 when lspci -nnk alone returns nothing" || bad "exit $RC — expected 1"
+grep -q 'lspci -nnk' "$TMP/pci2.md" \
+  && ok "warning names lspci -nnk" || bad "no warning although -nnk returned nothing"
+
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

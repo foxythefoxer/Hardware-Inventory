@@ -8,6 +8,9 @@ produced the verdict. Two streams share this ledger, told apart by ID prefix:
   Numbering does not correspond across those documents, which is why the prefixes exist.
 - **`FR-`** — requests submitted from outside the review cycle, filed as GitHub issues by a
   session working in a private notes vault. Open-ended; new ones land here.
+- **`CI-`** — findings from the suite running on a GitHub runner. A separate channel
+  because it is a separate host class: nobody read the code to find these, the code ran
+  somewhere that is not this machine and disagreed.
 - **`A-`** — findings from a whole-repo audit run against the working tree, as opposed to a
   review of a snapshot or a request for a feature. Open-ended, and deliberately keyed to
   the *channel* rather than to whichever model ran it: an audit is repeatable, so the next
@@ -457,6 +460,62 @@ Three proposals of one shape, worth doing together or not at all:
   `${f##*/}`. Bash-only, which line 1 already declares — the same argument G-001 settled.
 
 Accepted as cleanup, explicitly **not** as correctness. Each site works today.
+
+---
+
+## Continuous integration — `CI-`
+
+Findings produced by running the suite on a GitHub runner: a host class no machine here
+is, and the only channel that reports from one automatically. Kept out of `A-` because
+these are not audit findings — nobody read the code to find them, the code ran somewhere
+else and disagreed.
+
+### CI-001 — the PCI section warns on filtered-empty output — accepted, done
+
+**Every run of this workflow, from the first, was red for this one reason.** Three
+assertions failed on each: T2's `exits 0`, and T12's `exit 0` and `no warning for zero
+containers`, which name docker and displays and had nothing to do with either. The
+warning text itself was the misdirection — it claimed `lspci -nnk` returned nothing when
+the command had returned a full listing.
+
+The condition tested the **filtered** output. `PCIOUT` is `lspci -nnk` passed through an
+awk filter selecting `vga|3d controller|display|ethernet|network|raid|sata|non-volatile|
+serial attached`, and the warning fired on `[ -z "$PCIOUT" ]`. A GitHub runner is a
+virtualised guest whose NIC and disks are paravirtual — VMBus or virtio, not PCI — so the
+bus enumerates fine and matches none of those classes. That is a host genuinely lacking
+the hardware, which the exit-code contract makes **silent**: "a warning means the tool
+was present, permitted, and still returned nothing." It was present, permitted, and
+returned plenty.
+
+Measured, 2026-09-08: run `34177270429`, `110 passed, 3 failed`, unprivileged pass. The
+warnings block named exactly one collector. Reproduced locally with a stubbed `lspci`
+printing three bridge lines and no matching class — T17's first stub — and the three
+assertions go red against `6b38e32`'s script and green against the fix, which is the
+control this ledger holds every test to.
+
+The same block had a second defect of the same shape: the heading and code fence were
+printed **before** the filter ran, so a host with no matching devices got an empty
+```` ``` ```` block. That is the convention every other section follows and this one did
+not — capture, then print only if non-empty. T2's empty-table-header check does not see
+it, because a fence is not a table.
+
+Fixed by separating the raw listing from the filtered one: `PCIRAW` gates the warning,
+`PCIOUT` gates the section. T17 asserts both directions — a full listing matching nothing
+must be silent and exit 0, and a `-nnk` that alone returns nothing while plain `lspci`
+answers must still warn and exit 1. Without the second half, deleting the warning
+outright would pass.
+
+**Not a display, UPS or docker defect**, though the failing assertions were all in those
+tests. Worth stating because that is what a bare `exit 1` in a CI log implies, and it is
+what the log said for four runs. The diagnosis only became possible when `6b38e32` made
+those failure branches dump the warnings block — the fix and its diagnostic are one
+finding, and the diagnostic is the durable half.
+
+**Also found, and fixed with it:** the root pass had never run. Both suites are steps in
+one job, so the unprivileged failure skipped `Suite, root` on every run — T6's megaraid
+drive probe and the root-gated branches have not executed in CI once, contrary to what
+the workflow's own header comment claims about them. `if: ${{ !cancelled() }}` on that
+step; a failure in one pass must not hide the other's result.
 
 ---
 

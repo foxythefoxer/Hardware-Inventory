@@ -69,5 +69,13 @@ jobs:
       # T6's drive probe only runs here. Everything else is re-run as a
       # consequence, which is cheap and occasionally informative: several
       # branches (dmidecode, SMART, pct/qm, IPMI) are reachable no other way.
+      #
+      # `if` because steps stop at the first failure: the unprivileged suite was
+      # red on every run this workflow ever made, so the root pass — the only
+      # place T6 and the root-gated branches execute at all — had never once run
+      # when the comment above was written. A failure in one pass must not hide
+      # the other's result. `!cancelled()` rather than `always()`: a cancelled
+      # run should stop, not push on to a second three-minute suite.
       - name: Suite, root
+        if: ${{ !cancelled() }}
         run: sudo bash tests/run.sh

@@ -75,6 +75,11 @@ Verified against the file and covered by `tests/run.sh` where testable.
   live daemon** — this host has the UPS attached with neither apcupsd nor NUT
   installed, which is precisely why sysfs is the gate. Confirm those two rows
   on a host running apcupsd (**FT-001**); the no-UPS-at-all case is **FT-002**.
+- **CI-001** — the PCI section warned on its *filtered* output, so a guest whose NIC and
+  disks are paravirtual — matching none of the section's device classes — was called
+  broken. That one warning is why every CI run this workflow ever made was red, and why
+  three assertions in T2 and T12 blamed docker and displays. T17 covers both directions.
+  The root pass had never run either, being a later step in the same job; fixed with it.
 - **C-025 / C-026** — warning accumulator and meaningful exit code. The
   exit-code contract in `.claude/rules/collectors.md` is the operative statement
   of it.

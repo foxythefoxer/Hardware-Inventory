@@ -768,16 +768,24 @@ fi
 # -nn gives vendor:device IDs, -k gives the bound driver. Both matter more
 # than the human-readable name when diagnosing a driver problem.
 if have lspci; then
-  printf '### Notable PCI devices\n\n```\n'
-  PCIOUT=$("${TMO[@]}" lspci -nnk 2>/dev/null | awk '
+  # The raw listing and the filtered one are separate variables on purpose. The
+  # filter selects a handful of device classes, so a host can legitimately match
+  # none of them — a VM whose NIC and disks are paravirtual (VMBus, virtio) has
+  # a full PCI list with nothing interesting in it. Warning on the *filtered*
+  # emptiness called that host broken, which is the over-warning half of the
+  # exit-code contract: it made CI red on every run this workflow ever made,
+  # blaming lspci for hardware the runner genuinely does not have.
+  PCIRAW=$("${TMO[@]}" lspci -nnk 2>/dev/null || true)
+  PCIOUT=$(printf '%s\n' "$PCIRAW" | awk '
     /^[0-9a-f][0-9a-f]:/ { keep = (tolower($0) ~ /vga|3d controller|display|ethernet|network|raid|sata|non-volatile|serial attached/) }
     keep
   ' | cap "$PCI_DEVICE_LINES" "PCI device lines")
-  printf '%s\n' "$PCIOUT"
-  printf '```\n\n'
+  # Printed only when non-empty, like every other section: an empty code fence
+  # is a section announcing its shape and collecting nothing.
+  [ -n "$PCIOUT" ] && printf '### Notable PCI devices\n\n```\n%s\n```\n\n' "$PCIOUT"
   # Only warn when plain lspci worked — otherwise the probe above already did,
   # and one broken tool should not produce two warnings.
-  if [ -n "$LSPCI_RAW" ] && [ -z "$PCIOUT" ]; then
+  if [ -n "$LSPCI_RAW" ] && [ -z "$PCIRAW" ]; then
     warn '`lspci -nnk` returned nothing although plain `lspci` worked — the PCI device list with bound drivers is missing.'
   fi
 fi

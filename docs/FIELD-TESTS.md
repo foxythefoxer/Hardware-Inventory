@@ -1,10 +1,12 @@
 # Field tests — questions this host cannot answer
 
 Every change here is written and verified on one machine. That machine is one
-host class out of several: it has monitors on DisplayPort, a UPS on USB with no
-daemon talking to it, no ZFS zvols, and every run happens as root on bare metal.
-A branch that machine cannot reach is **not** verified by a green suite, and the
-suite will never say so — it passes just as loudly.
+host class out of several: bare metal with monitors on DisplayPort, a UPS on USB
+with no daemon talking to it, no ZFS zvols, no BMC, no hardware RAID — and no
+sudo, because agent sessions cannot answer an interactive password prompt, so
+every run here is unprivileged and the root half of the script is only ever
+*simulated*. A branch this machine cannot reach is **not** verified by a green
+suite, and the suite will never say so — it passes just as loudly.
 
 This file is where a session parks the question it could not answer, and where
 the operator picks up what to run elsewhere. **It is the only record of an
@@ -22,6 +24,8 @@ a verdict that scrolls out of the terminal. An entry is an ID and four lines:
 - **Needs** — what the host must have or lack. A class, never a machine.
 - **Why not here** — the specific fact about the development host that blocks it.
 - **Run** — exact commands, read-only, copy-pasteable.
+- **Run as** — root, unprivileged, or both. Never leave this to be inferred; see
+  below, it is the line that gets forgotten.
 - **Send back** — the smallest thing that settles it. Yes/no wherever it can be.
 
 **Ask for an answer, not a report.** "Does a `### UPS` section appear, and do the
@@ -32,6 +36,25 @@ the publishing rule in [`CLAUDE.md`](../CLAUDE.md).
 ## Running one (the operator)
 
 Commands below are bash; from fish, `bash -c '...'`. All are reads.
+
+**Run it both ways, and say which one each answer came from.** Root is not a
+detail of how you invoked it — it changes what the script can collect at all.
+`dmidecode` (model, DIMM layout), SMART health, `pct`/`qm` and IPMI are
+root-gated, and the report says *"not run as root, some fields incomplete"* in
+its header when they were skipped. An answer that does not say which run it came
+from cannot distinguish "this host lacks the hardware" from "that collector never
+ran", which is the one distinction this whole script is built around.
+
+```bash
+bash hw-inventory.sh      > "$HOME/hw-user.md"; echo "unprivileged exit=$?"
+sudo bash hw-inventory.sh > "$HOME/hw-root.md"; echo "root exit=$?"
+```
+
+Each entry's **Run as** line says whether both are actually wanted. Where it says
+one, the other adds nothing and is not worth your time; where it says both, the
+*difference* between the two runs is the answer. Same for the suite itself:
+`bash tests/run.sh` skips T6's drive probe, `sudo bash tests/run.sh` is the only
+thing that runs it, and CI has always run both — badly, until CI-001.
 
 **Never send the whole report.** Send only what **Send back** asks for, and read
 it before sending. `### Identity`, `### Network interfaces` and the `host:`
@@ -62,8 +85,13 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   bash hw-inventory.sh > "$HOME/hw.md"; echo "exit=$?"
   sed -n '/^### UPS/,/^###[^#]/p' "$HOME/hw.md"
   ```
+- **Run as:** **both.** No part of the UPS section is root-gated, but
+  `/etc/apcupsd/apcupsd.conf` is read through `[ -r ]` and its mode varies by
+  distribution — if the `apcupsd config` row appears only under `sudo`, that is
+  itself the finding, and it means the row cannot be trusted on an ordinary run.
 - **Send back:** which `Signal` rows appear (row labels only, values redacted),
   the exit code, and whether the warnings block mentions the UPS section at all.
+  Both runs, marked.
 
 ### FT-002 — no UPS attached (FR-002, negative)
 
@@ -76,6 +104,8 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   bash hw-inventory.sh > "$HOME/hw.md"; echo "exit=$?"
   grep -c '^### UPS' "$HOME/hw.md"; sed -n '/^## Collection warnings/,$p' "$HOME/hw.md"
   ```
+- **Run as:** unprivileged is enough. Nothing in this section is root-gated, so a
+  root run answers the same question twice.
 - **Send back:** the count (must be `0`), the exit code, and whether any warning
   names a UPS tool. A warning here would be the bug — absent hardware is silent.
 
@@ -91,6 +121,8 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   bash hw-inventory.sh > "$HOME/hw.md"; echo "exit=$?"
   grep -c '^### Displays' "$HOME/hw.md"; sed -n '/^## Collection warnings/,$p' "$HOME/hw.md"
   ```
+- **Run as:** unprivileged. EDID is a world-readable sysfs file, so root changes
+  nothing here.
 - **Send back:** the `drm` listing, the count (must be `0`), the exit code, and
   whether anything warned about displays.
 
@@ -106,6 +138,10 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   bash hw-inventory.sh > "$HOME/hw.md"
   sed -n '/^### Displays/,/^###[^#]/p' "$HOME/hw.md"
   ```
+- **Run as:** unprivileged first. If the Displays section is missing entirely as
+  an ordinary user, re-run with `sudo` — a section that appears only under root
+  means the EDID files are not world-readable on that distribution, which is a
+  finding in itself and not what this entry set out to ask.
 - **Send back:** whether each connector row carries a recognisable make and model
   (yes/no per row is enough — the strings themselves are not needed), and whether
   any row came out empty or full of control characters.
@@ -123,6 +159,10 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   bash hw-inventory.sh > "$HOME/hw.md"
   sed -n '/^### Storage — physical devices/,/^###[^#]/p' "$HOME/hw.md" | grep -c 'zd[0-9]'
   ```
+- **Run as:** unprivileged answers this one — `lsblk` needs no privilege. Send
+  the root run too if it is no trouble: on a Proxmox host that pass also
+  exercises `pct`/`qm`, `dmidecode` and SMART, none of which any machine here can
+  reach, and FT-007 is the standing request for exactly that.
 - **Send back:** that `zd*` devices exist at all (otherwise the test proves
   nothing), and the count from the second command — it must be `0`.
 
@@ -131,10 +171,11 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
 - **Needs:** two answers, from two classes: an **unprivileged Proxmox LXC**, and a
   **normal user shell on a whitebox desktop**.
 - **Why not here:** FR-004 proposes filling model and motherboard from
-  `/sys/devices/virtual/dmi/id/` when `dmidecode` is absent or unprivileged. Every
-  run here is root on bare metal, where those files always exist — so whether the
-  feature needs a gate or has a silent hole is not observable from this machine.
-  Answer this **before** the implementation, not after.
+  `/sys/devices/virtual/dmi/id/` when `dmidecode` is absent or unprivileged. This
+  machine is bare metal, where that directory always exists — the case that
+  decides whether the feature needs a gate or has a silent hole is a container,
+  which may have no such directory at all. Answer this **before** the
+  implementation, not after.
 - **Run:**
   ```bash
   ls /sys/devices/virtual/dmi/id/ 2>&1 | head -20
@@ -142,9 +183,37 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
     test -r /sys/devices/virtual/dmi/id/$f && echo "$f readable" || echo "$f NOT readable"
   done'
   ```
+- **Run as:** **unprivileged, and it matters more here than anywhere.** The whole
+  question is what a non-root run can see; a `sudo` answer to FT-006 is not a
+  weaker answer, it is an answer to a different question.
 - **Send back:** the listing (or the error, if the directory is absent — that is
   the answer for an LXC) and the four readable/not lines, per host class. Values
   are not wanted, only whether they can be read.
+
+### FT-007 — the root half, on hardware that has any (standing)
+
+- **Needs:** any host you can `sudo` on, and ideally one with a BMC, a
+  PERC/MegaRAID controller, or DIMM slots `dmidecode` can enumerate.
+- **Why not here:** agent sessions on the development host have no sudo — it
+  needs an interactive password no session can supply — so the entire root half
+  of this script has only ever been exercised by *simulating* `is_root() { true; }`
+  against a copy. CI runs as root and covers the stubs and fixtures; what it
+  cannot cover is real IPMI, a real RAID controller, and real DIMM records, since
+  a runner has none of them. That is what this asks for.
+- **Run:**
+  ```bash
+  sudo bash tests/run.sh 2>&1 | tail -3
+  sudo bash hw-inventory.sh > "$HOME/hw-root.md"; echo "exit=$?"
+  grep -c '^### ' "$HOME/hw-root.md"; sed -n '/^## Collection warnings/,$p' "$HOME/hw-root.md"
+  ```
+- **Run as:** root, by definition. The unprivileged pass is what every other
+  entry already covers.
+- **Send back:** the suite's pass/fail line, the script's exit code, the section
+  count, and the warnings block verbatim — it names tools, not machines, which is
+  why it is the one part of a report that is always safe to paste. Say what the
+  host class is: BMC or not, hardware RAID or not.
+- **Standing, not one-shot.** Re-run it after any change to a root-gated
+  collector. It is the only check that touches real privileged hardware.
 
 ---
 
