@@ -214,15 +214,19 @@ fi
 KERN=$(uname -r)
 ARCH=$(uname -m)
 
-CPUMODEL=""
-if have lscpu; then
-  CPUMODEL=$("${TMO[@]}" lscpu 2>/dev/null | awk -F: '/^Model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
-fi
+# lscpu and free are each captured once and re-parsed from the text (A-008),
+# the same way DMIMEM is below. Both are read here rather than at their
+# sections because the frontmatter needs a field from each before anything
+# prints.
+LSCPU=""
+have lscpu && LSCPU=$("${TMO[@]}" lscpu 2>/dev/null)
+CPUMODEL=$(printf '%s\n' "$LSCPU" | awk -F: '/^Model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
 [ -z "$CPUMODEL" ] && CPUMODEL=$(awk -F: '/model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null)
 [ -z "$CPUMODEL" ] && warn 'CPU model unknown: neither `lscpu` nor /proc/cpuinfo yielded a model name.'
 
-RAMTOTAL=""
-have free && RAMTOTAL=$(free -h 2>/dev/null | awk '/^Mem:/{print $2}')
+FREE=""
+have free && FREE=$("${TMO[@]}" free -h 2>/dev/null)
+RAMTOTAL=$(printf '%s\n' "$FREE" | awk '/^Mem:/{print $2}')
 if have free && [ -z "$RAMTOTAL" ]; then
   warn '`free` is installed but reported no total memory — RAM fields are empty.'
 fi
@@ -322,21 +326,20 @@ if [ -r /proc/loadavg ]; then
   kv "Load average" "$(awk '{print $1", "$2", "$3}' /proc/loadavg 2>/dev/null)"
 fi
 if have free; then
-  kv "RAM used / available" "$(free -h 2>/dev/null | awk '/^Mem:/{print $3" / "$7}')"
-  kv "Swap used / total" "$(free -h 2>/dev/null | awk '/^Swap:/{print $3" / "$2}')"
+  kv "RAM used / available" "$(printf '%s\n' "$FREE" | awk '/^Mem:/{print $3" / "$7}')"
+  kv "Swap used / total" "$(printf '%s\n' "$FREE" | awk '/^Swap:/{print $3" / "$2}')"
 fi
 echo
 
 # ----------------------------------------------------------------- CPU ------
 printf '### CPU\n\n| Field | Value |\n|---|---|\n'
 if have lscpu; then
-  LC=$("${TMO[@]}" lscpu 2>/dev/null)
-  [ -z "$LC" ] && warn '`lscpu` is installed but returned nothing — socket, core and thread counts are missing.'
+  [ -z "$LSCPU" ] && warn '`lscpu` is installed but returned nothing — socket, core and thread counts are missing.'
   kv "Model" "$CPUMODEL"
-  kv "Sockets" "$(echo "$LC" | awk -F: '/^Socket\(s\)/{gsub(/ /,"",$2); print $2; exit}')"
-  kv "Cores per socket" "$(echo "$LC" | awk -F: '/^Core\(s\) per socket/{gsub(/ /,"",$2); print $2; exit}')"
-  kv "Threads per core" "$(echo "$LC" | awk -F: '/^Thread\(s\) per core/{gsub(/ /,"",$2); print $2; exit}')"
-  kv "Logical CPUs" "$(echo "$LC" | awk -F: '/^CPU\(s\):/{gsub(/ /,"",$2); print $2; exit}')"
+  kv "Sockets" "$(printf '%s\n' "$LSCPU" | awk -F: '/^Socket\(s\)/{gsub(/ /,"",$2); print $2; exit}')"
+  kv "Cores per socket" "$(printf '%s\n' "$LSCPU" | awk -F: '/^Core\(s\) per socket/{gsub(/ /,"",$2); print $2; exit}')"
+  kv "Threads per core" "$(printf '%s\n' "$LSCPU" | awk -F: '/^Thread\(s\) per core/{gsub(/ /,"",$2); print $2; exit}')"
+  kv "Logical CPUs" "$(printf '%s\n' "$LSCPU" | awk -F: '/^CPU\(s\):/{gsub(/ /,"",$2); print $2; exit}')"
 else
   kv "Model" "$CPUMODEL"
   kv "Logical CPUs" "$(grep -c ^processor /proc/cpuinfo 2>/dev/null)"
@@ -398,7 +401,7 @@ fi
 # ---------------------------------------------------------------- MEMORY ----
 printf '### Memory\n\n| Field | Value |\n|---|---|\n'
 have free && kv "Total RAM" "$RAMTOTAL"
-have free && kv "Swap total" "$(free -h 2>/dev/null | awk '/^Swap:/{print $2}')"
+have free && kv "Swap total" "$(printf '%s\n' "$FREE" | awk '/^Swap:/{print $2}')"
 DMIMEM=""
 if is_root && have dmidecode; then
   # Captured once: the emptiness check below needs it, and the three parses
