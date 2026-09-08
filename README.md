@@ -189,7 +189,7 @@ platform: "bare-metal"
 cpu: "Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz"
 ram: "94Gi"
 collected: 2026-08-06
-collector: hw-inventory.sh v5
+collector: hw-inventory.sh v6
 tags: [homelab, inventory, hardware]
 ---
 ```
@@ -207,24 +207,30 @@ Docker · Failed systemd units · Collection warnings (only when something faile
 place the version appears in the output. **It moves when the emitted report
 changes for some class of host, and only once per state the world has seen.**
 
-**v5** is Displays, UPS, and the CI-001 PCI fix. That last one changes the report
-— on a host whose PCI devices match none of the section's classes, a section and
-a spurious warning both disappear, and the exit code goes from `1` to `0` — and
-it still did not earn v6, because no report has ever been produced by a v5
-without it. A version number describes what a consumer can be holding, not what
-the repository did; two numbers for a state nothing ever ran is noise in every
-vault that files by this field. The next behaviour change, once v5 has run
-somewhere, is v6.
+**v6** is the queue batch: C-005 (os-release parsed, not sourced), C-016 +
+A-007 (one `lsblk -P` capture, and a megaraid probe that skips the USB boot
+key), A-008, A-009 and C-004 (`|` escaped in every table cell). Two of those
+change the report — an Unraid host gets drive rows where it got "no drives
+answered", and any cell containing a pipe stops shifting the columns after it.
+
+**v5** was Displays, UPS, and the CI-001 PCI fix. That last one changed the
+report too — on a host whose PCI devices match none of the section's classes, a
+section and a spurious warning both disappear, and the exit code goes from `1`
+to `0` — and it still did not earn a number of its own, because no report had
+ever been produced by a v5 without it. A version number describes what a
+consumer can be holding, not what the repository did; two numbers for a state
+nothing ever ran is noise in every vault that files by this field. v5 was
+tagged and fetchable before this batch, so this one is v6.
 
 What changed in each version is the *Done* list in
 [`docs/QUEUE.md`](docs/QUEUE.md). The version is written twice in the script —
 the header comment and that `printf` — and T1 fails if the two ever disagree,
 which is how a stale `collector:` misfiling every report gets caught.
 
-**Every version is also a git tag, and a tag never moves.** `v5` points at the
+**Every version is also a git tag, and a tag never moves.** `v6` points at the
 commit that minted it and keeps pointing there after `main` has moved on. A
-change that alters the report earns `v6` and its own tag, never a re-cut `v5` —
-a host that already fetched would go on running the old one and say `v5` either
+change that alters the report earns `v7` and its own tag, never a re-cut `v6` —
+a host that already fetched would go on running the old one and say `v6` either
 way. Docs, tests and hooks change under a tag without minting one; the collector
 is what the tag is for.
 
@@ -232,7 +238,7 @@ Pin a sweep so a month of reports cannot straddle a bump:
 
 ```bash
 git -C /opt/hw-inventory fetch --tags
-git -C /opt/hw-inventory checkout v5     # detached HEAD, deliberately
+git -C /opt/hw-inventory checkout v6     # detached HEAD, deliberately
 sudo bash /opt/hw-inventory/hw-inventory.sh > "$(hostname)-$(date +%F).md"
 ```
 

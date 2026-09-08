@@ -143,6 +143,14 @@ for slot in parity disk1 cache flash; do
   grep -q "^| $slot |" "$TMP/u.md" && ok "slot '$slot' parsed" || bad "slot '$slot' missing"
 done
 grep -q '7.28 TB' "$TMP/u.md" && ok "KB->TB conversion correct" || bad "size conversion wrong"
+# C-004, the awk half. disk2's id carries literal pipes; escaped, the row keeps
+# its 8 cells. The column count is asserted as well as the escape, because a
+# row can be escaped and still be built wrong.
+grep -qF '| FIXTURE_PIPE\|IN\|IDENTITY |' "$TMP/u.md" \
+  && ok "pipe in a slot identity escaped" || bad "pipe in a slot identity not escaped"
+sed -n '/FIXTURE_PIPE/s/\\|//gp' "$TMP/u.md" | awk -F'|' '{print NF-2}' | grep -qx '8' \
+  && ok "escaped row still splits into its 8 declared cells" \
+  || bad "escaped row has the wrong cell count"
 grep -q '78% used' "$TMP/u.md" && ok "fill percentage correct" || bad "fill percentage wrong"
 grep -q 'STARTED' "$TMP/u.md" && ok "array state read" || bad "array state missing"
 # The share name is the .cfg filename with its suffix stripped, so this row
@@ -174,6 +182,13 @@ grep -q '^| /dev/sdb | 3.6T | FIXTURE-DISK-A |' "$TMP/r.md" \
   && ok "device table built from the single lsblk -P capture" || bad "device row missing or columns shifted"
 grep -q '/dev/zd0' "$TMP/r.md" \
   && bad "ZFS zvol (TYPE=disk) survived the name exclusion" || ok "zvol excluded from the device table"
+# C-004, the shell half: every table row goes through row(), which escapes each
+# cell. sda's MODEL is `FIXTURE|BOOT|KEY` — unescaped it becomes three columns.
+grep -qF '| FIXTURE\|BOOT\|KEY |' "$TMP/r.md" \
+  && ok "pipe in an lsblk MODEL escaped" || bad "pipe in an lsblk MODEL not escaped"
+sed -n '/FIXTURE-USB-0001/s/\\|//gp' "$TMP/r.md" | awk -F'|' '{print NF-2}' | grep -qx '6' \
+  && ok "escaped device row still splits into its 6 declared cells" \
+  || bad "escaped device row has the wrong cell count"
 
 # The script only probes SMART as root, by design. Without root there is
 # nothing to assert here, so skip rather than report a false failure.

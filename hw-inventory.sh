@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hw-inventory.sh v5 — emit a Markdown block describing this host.
+# hw-inventory.sh v6 — emit a Markdown block describing this host.
 #
 # Read-only. Collects nothing off-box, writes nothing, sends nothing.
 # Every command is a query. Deliberately absent: smartctl -t (self-tests),
@@ -169,7 +169,18 @@ warn() {
 "
 }
 
-kv() { printf '| %s | %s |\n' "$1" "${2:-$NA}"; }
+# One Markdown table row, one argument per cell. A literal `|` in a value —
+# an lsblk MODEL, a VM's disk list, an Unraid status string — would otherwise
+# split the row into extra columns and shift every cell after it (C-004), so
+# each cell is escaped here rather than at ten call sites. Cells are data:
+# never pass a pre-built row through this.
+row() {
+  local c out=""
+  for c in "$@"; do out="${out}| ${c//|/\\|} "; done
+  printf '%s|\n' "$out"
+}
+
+kv() { row "$1" "${2:-$NA}"; }
 
 # YAML-safe scalar for the frontmatter block.
 yk() {
@@ -278,7 +289,7 @@ yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
 printf 'collected: %s\n' "$(date '+%Y-%m-%d')"
-printf 'collector: hw-inventory.sh v5\n'
+printf 'collector: hw-inventory.sh v6\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 
@@ -449,8 +460,7 @@ if have lsblk; then
         tran=$(fld TRAN "$line");   model=$(fld MODEL "$line")
         serial=$(fld SERIAL "$line")
         case "$rota" in 1) kind="HDD";; 0) kind="SSD/NVMe";; *) kind="$NA";; esac
-        printf '| /dev/%s | %s | %s | %s | %s | %s |\n' \
-          "$name" "${size:-$NA}" "${model:-$NA}" "${serial:-$NA}" "$kind" "${tran:-$NA}"
+        row "/dev/$name" "${size:-$NA}" "${model:-$NA}" "${serial:-$NA}" "$kind" "${tran:-$NA}"
       done)
   if [ -n "$DEVROWS" ]; then
     printf '| Device | Size | Model | Serial | Type | Bus |\n|---|---|---|---|---|---|\n'
@@ -487,10 +497,10 @@ if have smartctl && [ -n "$DISKS" ]; then
       if printf '%s' "$SM" | grep -qi 'STANDBY mode'; then
         # A standby answer is a successful query — the drive was reached.
         SMOK=$((SMOK + 1))
-        printf '| /dev/%s | (standby — not woken) | %s | %s | %s | %s |\n' "$d" "$NA" "$NA" "$NA" "$NA"
+        row "/dev/$d" "(standby — not woken)" "$NA" "$NA" "$NA" "$NA"
         continue
       fi
-      [ -z "$SM" ] && { printf '| /dev/%s | %s | %s | %s | %s | %s |\n' "$d" "(no data)" "$NA" "$NA" "$NA" "$NA"; continue; }
+      [ -z "$SM" ] && { row "/dev/$d" "(no data)" "$NA" "$NA" "$NA" "$NA"; continue; }
       SMOK=$((SMOK + 1))
 
       health=$(printf '%s\n' "$SM" | awk -F: '/overall-health|SMART Health Status/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
@@ -508,8 +518,7 @@ if have smartctl && [ -n "$DISKS" ]; then
       tmp=$(printf '%s\n' "$SM" | awk '/Temperature_Celsius|Airflow_Temperature/{print $10"C"; exit}')
       [ -z "$tmp" ] && tmp=$(printf '%s\n' "$SM" | awk -F: '/^Temperature:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
 
-      printf '| /dev/%s | %s | %s | %s | %s | %s |\n' \
-        "$d" "${health:-$NA}" "${poh:-$NA}" "$rp" "${wear:-$NA}" "${tmp:-$NA}"
+      row "/dev/$d" "${health:-$NA}" "${poh:-$NA}" "$rp" "${wear:-$NA}" "${tmp:-$NA}"
     done
     if [ "$SMOK" -eq 0 ]; then
       warn "\`smartctl\` answered for none of the $SMTOTAL disk(s) as root — every health row is empty. Drives behind a RAID controller are expected here; a plain SATA/NVMe host is not."
@@ -605,7 +614,7 @@ if [ -n "$RAIDCTL" ]; then
         ra=$(printf '%s\n' "$MS" | awk '/Reallocated_Sector_Ct/{print $10; exit}')
         tmp=$(printf '%s\n' "$MS" | awk '/Temperature_Celsius|Airflow_Temperature/{print $10"C"; exit}')
         [ -z "$tmp" ] && tmp=$(printf '%s\n' "$MS" | awk -F: '/^Current Drive Temperature/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
-        MRROWS="${MRROWS}| megaraid,${n} | ${mdl:-$NA} | ${ser:-$NA} | ${hlt:-$NA} | ${poh:-$NA} | ${ra:-$NA} | ${tmp:-$NA} |
+        MRROWS="${MRROWS}$(row "megaraid,${n}" "${mdl:-$NA}" "${ser:-$NA}" "${hlt:-$NA}" "${poh:-$NA}" "${ra:-$NA}" "${tmp:-$NA}")
 "
       done
       if [ -n "$MRROWS" ]; then
@@ -650,7 +659,11 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
         return sprintf("%.0f MB", x/1024)
       }
       function pct(u, t) { if (t+0 == 0) return "—"; return sprintf("%.0f%%", (u+0)*100/(t+0)) }
-      function row() {
+      # Same job as the shell row() above, for the one table built in awk: a
+      # `|` in a slot name or a status string would split the row (C-004).
+      # Applied where values enter, so every cell below is covered once.
+      function esc(s) { gsub(/\|/, "\\|", s); return s }
+      function emit() {
         if (sec == "") return
         if (dev == "" && id == "") return
         printf "| %s | %s | %s | %s | %s | %s | %s | %s |\n", \
@@ -658,10 +671,10 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
           (fs==""?"—":fs), (fsz==""?"—":hs(fsz) " (" pct(fu,fsz) " used)"), \
           (st==""?"—":st), (tp==""||tp=="*"?"—":tp "C")
       }
-      /^\[/ { row(); sec=$0; gsub(/[\["\]]/,"",sec)
+      /^\[/ { emit(); sec=$0; gsub(/[\["\]]/,"",sec); sec=esc(sec)
               dev="";id="";sz="";st="";tp="";fs="";fsz="";fu=""; next }
       {
-        k=$1; v=$0; sub(/^[^=]*=/,"",v); gsub(/"/,"",v)
+        k=$1; v=$0; sub(/^[^=]*=/,"",v); gsub(/"/,"",v); v=esc(v)
         if      (k=="device") dev=v
         else if (k=="id")     id=v
         else if (k=="size")   sz=v
@@ -671,7 +684,7 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
         else if (k=="fsSize") fsz=v
         else if (k=="fsUsed") fu=v
       }
-      END { row() }
+      END { emit() }
     ' /var/local/emhttp/disks.ini 2>/dev/null)
     if [ -n "$UDISKS" ]; then
       printf '#### Array slots\n\n'
@@ -691,8 +704,7 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
       [ -r "$f" ] || continue
       n=${f##*/}; n=${n%.cfg}
       g() { awk -F= -v k="$1" '$1==k{gsub(/"/,"",$2); print $2; exit}' "$f" 2>/dev/null; }
-      printf '| %s | %s | %s | %s | %s |\n' \
-        "$n" "$(g shareUseCache)" "$(g shareCachePool)" \
+      row "$n" "$(g shareUseCache)" "$(g shareCachePool)" \
         "$(g shareAllocator)" "$(g shareInclude)"
     done)
     if [ -n "$USHARES" ]; then
@@ -773,7 +785,7 @@ else
     [ -z "$addrs" ] && addrs="$NA"
     spd=$(cat "/sys/class/net/$ifc/speed" 2>/dev/null)
     if [ -n "$spd" ] && [ "$spd" -gt 0 ] 2>/dev/null; then spd="${spd} Mb/s"; else spd="$NA"; fi
-    printf '| %s | %s | %s | %s | %s |\n' "$ifc" "$state" "$mac" "$addrs" "$spd"
+    row "$ifc" "$state" "$mac" "$addrs" "$spd"
   done)
   if [ -n "$IFROWS" ]; then
     printf '| Interface | State | MAC | Addresses | Link speed |\n|---|---|---|---|---|\n'
@@ -1027,7 +1039,9 @@ if have pveversion || have pct || have qm; then
       mem=$(cfgget memory)
       unp=$(cfgget unprivileged)
       case "$unp" in 1) unp="yes";; 0) unp="no";; *) unp="no";; esac
-      CTROWS="${CTROWS}| ${id} | $(cfgget hostname) | ${st:-$NA} | $(cfgget ostype) | $(cfgget cores) | ${mem:-$NA} MiB | $(cfgget rootfs) | ${unp} | $(cfgget features) | ${ctip:-$NA} | ${ctbr:-$NA} | $(cfgget onboot) |
+      CTROWS="${CTROWS}$(row "$id" "$(cfgget hostname)" "${st:-$NA}" "$(cfgget ostype)" \
+        "$(cfgget cores)" "${mem:-$NA} MiB" "$(cfgget rootfs)" "$unp" "$(cfgget features)" \
+        "${ctip:-$NA}" "${ctbr:-$NA}" "$(cfgget onboot)")
 "
     done
     if [ -n "$CTROWS" ]; then
@@ -1052,7 +1066,9 @@ if have pveversion || have pct || have qm; then
       vdisks=$(printf '%s\n' "$CFG" | grep -E '^(scsi|virtio|sata|ide)[0-9]+:' \
         | grep -v 'media=cdrom' | sed 's/: /=/' | paste -sd'; ' -)
       vnet=$(printf '%s\n' "$CFG" | grep -E '^net[0-9]+:' | sed 's/: /=/' | paste -sd'; ' -)
-      VMROWS="${VMROWS}| ${id} | $(cfgget name) | ${vst:-$NA} | $(cfgget cores) | $(cfgget memory) MiB | ${vdisks:-$NA} | ${vnet:-$NA} | $(cfgget ostype) | $(cfgget onboot) |
+      VMROWS="${VMROWS}$(row "$id" "$(cfgget name)" "${vst:-$NA}" "$(cfgget cores)" \
+        "$(cfgget memory) MiB" "${vdisks:-$NA}" "${vnet:-$NA}" "$(cfgget ostype)" \
+        "$(cfgget onboot)")
 "
     done
     if [ -n "$VMROWS" ]; then
@@ -1117,6 +1133,10 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
     DNET=$(tmo 15 docker inspect -f '{{.Name}}|{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{if $v.IPAddress}}{{$v.IPAddress}}{{else}}—{{end}} {{end}}' $CNAMES 2>/dev/null \
       | sed 's#^/##' \
       | awk -F'|' 'NF==2 && $2!=""{printf "| %s | %s |\n", $1, $2}')
+    # No escaping pass here, unlike every other table (C-004): `|` is this
+    # parser's own field separator, so a cell containing one makes NF!=2 and
+    # the row is dropped rather than mangled. Docker names and network names
+    # cannot contain one in any case.
   fi
   if [ -n "$DNET" ]; then
     printf '#### Container networks\n\n| Container | Network=IP |\n|---|---|\n%s\n\n' "$DNET"

@@ -9,9 +9,12 @@
 #
 # Serials are invented, and named as such. One lsblk answer serves every call
 # site since A-007 hoisted them into a single -P capture.
+#
+# sda's MODEL carries the literal pipes C-004 is about: unescaped they split
+# the row into extra columns and shift every cell after it.
 cat <<'L'
 NAME="nvme0n1" TYPE="disk" SIZE="1.8T" ROTA="0" TRAN="nvme" MODEL="FIXTURE-NVME" SERIAL="FIXTURE-NVME-0001"
-NAME="sda" TYPE="disk" SIZE="14.6G" ROTA="1" TRAN="usb" MODEL="FIXTURE-BOOT-KEY" SERIAL="FIXTURE-USB-0001"
+NAME="sda" TYPE="disk" SIZE="14.6G" ROTA="1" TRAN="usb" MODEL="FIXTURE|BOOT|KEY" SERIAL="FIXTURE-USB-0001"
 NAME="sdb" TYPE="disk" SIZE="3.6T" ROTA="1" TRAN="sata" MODEL="FIXTURE-DISK-A" SERIAL="FIXTURE-SATA-0001"
 NAME="zd0" TYPE="disk" SIZE="32G" ROTA="1" TRAN="" MODEL="" SERIAL=""
 NAME="loop0" TYPE="loop" SIZE="4G" ROTA="1" TRAN="" MODEL="" SERIAL=""
