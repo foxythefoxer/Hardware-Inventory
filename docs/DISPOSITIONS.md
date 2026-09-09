@@ -127,13 +127,19 @@ check: extract every `` `xxxxxxx` `` from this file and `git cat-file -e` each o
 
 ---
 
-## Feature requests — `FR-`
+## Issue tracker — `FR-`
 
 Submitted from outside the review cycle. Same three verdicts as above: accepted, accepted
 with changes, or rejected. "Accepted with changes" means the conditions listed **are** the
 acceptance, not commentary on it — an implementation that drops one has not implemented
 the request. A rejected request is recorded here at the same length as an accepted one,
 because a rejection nobody can audit gets re-proposed.
+
+**The prefix is the channel, not the kind.** FR-005 is a defect report, not a feature; it
+is `FR-` because it arrived as a GitHub issue. Do not mint a `B-` for bugs — the reason
+`C-`/`G-`/`O-` name reviewers is that that set is closed and can never grow, and every
+open-ended channel here is keyed to the channel precisely so a later item stays findable
+under the prefix someone would search.
 
 ### FR-001 — monitor detection via DRM EDID — accepted with changes
 
@@ -303,6 +309,62 @@ DMI identity is the outlier that has no fallback. Conditions:
   there are now three states rather than two: full identity, partial identity from
   sysfs, and nothing. Do not let the partial state print the "(needs root)" row *and*
   the values.
+
+### FR-005 — CRLF from the Unraid flash device breaks the Shares table — accepted, done
+
+Issue #2, and the first defect found by a real host rather than by a review: the v6
+collector's first run against the Unraid box. Every row of the Shares table ended after
+its first cell, and the flash-identity line broke in the middle with what looked like a
+misplaced comma.
+
+Not a trailing newline, which is what the report reasonably guessed. **A carriage
+return.** Unraid's `/boot` is the FAT32 flash device and emhttp writes its config files
+CRLF, so `awk -F=` leaves the CR on the last field, and `$(...)` strips trailing newlines
+but not a CR. Markdown then honours the bare CR as a line break. **Reproduced** against a
+CRLF fixture, byte-identical to the corruption in the issue:
+
+```
+| crlfshare | no^M | ^M | mostfree^M | disk1^M |
+Flash identity: `NAME=...^M,COMMENT=...^M`
+```
+
+The "stray leading comma" is that CR sitting in front of `paste`'s delimiter, not a join
+bug. One symptom, one cause.
+
+Fixed at the two places a cell is built, not at the fields the issue named:
+
+- **`row()` strips the CR**, next to the `|` escape it already applies (C-004). That is
+  one site covering the Shares table, the `var.ini` field table, and every other table in
+  the script, rather than a `tr -d` at each of the four `$(g ...)` calls the report
+  pointed at — and the sibling callers were equally broken, which a per-field fix would
+  have left that way.
+- **The `ident.cfg` awk strips it in the existing `gsub`.** That line is not a table cell,
+  so `row()` does not cover it.
+
+Two things deliberately **not** changed, both rejected on the same evidence rule the rest
+of this ledger runs on — neither could be made to fail a test:
+
+- **Folding an embedded newline to a space in `row()`.** Drafted, then cut. Unreachable:
+  `awk` splits on newlines before a value ever reaches a cell, and every other `row`/`kv`
+  call site is single-line by construction (`paste -s`, `head -1`, `printf` accumulation).
+  This is O-001's rule applied to a change of my own — harmless, not a correctness fix,
+  and not to be sold as one.
+- **The same CR strip in the `disks.ini` `esc()`.** Its twin in `row()` has it, which is
+  an asymmetry worth a comment rather than a guard: `/var/local/emhttp` is tmpfs and LF.
+  `/boot` is the DOS filesystem; that boundary is now stated at `row()`.
+
+Both halves tested. `shares/crlf.cfg` and a new `ident.cfg` fixture are CRLF; T4 asserts
+each **whole row on one line**, anchored `^...$`, because a `grep -q '| crlf | no'` passes
+against the broken output too — the break lands after the cell it checks. `appdata.cfg`
+stays LF as the control. Reverting the two strips turns both cases red; **verified**.
+`.gitattributes` pins `tests/fixtures/** -text`, since a checkout filter normalising those
+CRLFs would leave the test green and testing nothing — the T13/T14 failure mode.
+
+Suite 149/0, baseline 147/0. Root pass and ShellCheck in CI. **Unverified here**: the fix
+against the real Unraid host that filed it — this machine is a whitebox AM5 desktop with
+no flash device. Filed in `docs/FIELD-TESTS.md`.
+
+v7. It changes the emitted report for one host class, which is what a version is for.
 
 ---
 

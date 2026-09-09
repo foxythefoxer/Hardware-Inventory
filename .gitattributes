@@ -1,0 +1,4 @@
+# Fixtures are byte-exact test data, line endings included: the Unraid share
+# and ident fixtures are CRLF on purpose (FR-005, the FAT32 flash device), and a
+# checkout filter that normalised them would silently disable that test.
+tests/fixtures/** -text

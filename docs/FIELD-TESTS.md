@@ -274,6 +274,36 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   includes its header row, so **sections + 1** is the pass; anything lower means
   a slot was dropped, and the first command says which.
 
+### FT-010 — does v7 actually render the Shares table on the host that broke? (FR-005)
+
+- **Needs:** the Unraid host that filed issue #2, running v7.
+- **Why not here:** no flash device. FR-005 was reproduced and fixed against a
+  CRLF fixture — the corruption reproduced byte-identically to the issue, and
+  reverting the fix turns T4's two new cases red — but a fixture is a model of
+  the file, not the file. What it cannot rule out is a *second* DOS-formatted
+  input in that section that this repo has no sample of: `disks.ini` and
+  `var.ini` are assumed LF because `/var/local/emhttp` is tmpfs, and the awk
+  table that reads them carries no CR guard on that assumption.
+- **Run:**
+  ```bash
+  git -C /opt/hw-inventory fetch --tags && git -C /opt/hw-inventory checkout v7
+  bash /opt/hw-inventory/hw-inventory.sh > "$HOME/hw.md"; echo "exit=$?"
+  # Any CR left anywhere in the report, and where:
+  grep -n $'\r' "$HOME/hw.md" | cut -d: -f1 | tr '\n' ' '; echo "cr-lines-above"
+  # Do the two tables have the same number of rows as they have entries?
+  sed -n '/^#### Shares/,/^_.shareUseCache/p' "$HOME/hw.md" | grep -c '^| '
+  ls /boot/config/shares/*.cfg | wc -l
+  # And are the source files CRLF as assumed?
+  file /boot/config/shares/*.cfg /boot/config/ident.cfg /var/local/emhttp/*.ini | sed 's#.*/##'
+  ```
+- **Run as:** one run, root — Unraid's console is root and this section is not
+  root-gated either way.
+- **Send back:** four short things, no report. (1) The exit code. (2) The
+  `cr-lines-above` list — **empty is the pass**. (3) The two counts: shares + 2
+  (header and separator) should equal the row count. (4) The `file` output,
+  which is the part a fixture cannot answer — it says whether the `.ini` files
+  really are LF, or whether the awk table needs the guard too.
+
 ### FT-007 — the root half, on hardware that has any (standing)
 
 - **Needs:** any host you can `sudo` on, and ideally one with a BMC, a

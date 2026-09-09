@@ -189,7 +189,7 @@ platform: "bare-metal"
 cpu: "Intel(R) Xeon(R) CPU E5-2470 v2 @ 2.40GHz"
 ram: "94Gi"
 collected: 2026-08-06
-collector: hw-inventory.sh v6
+collector: hw-inventory.sh v7
 tags: [homelab, inventory, hardware]
 ---
 ```
@@ -206,6 +206,13 @@ Docker · Failed systemd units · Collection warnings (only when something faile
 `collector:` is the version a vault files the report under, and it is the only
 place the version appears in the output. **It moves when the emitted report
 changes for some class of host, and only once per state the world has seen.**
+
+**v7** is FR-005, the first defect a real Unraid host found rather than a review:
+`/boot` is the FAT32 flash device, so its `.cfg` files are CRLF, and the CR rode
+through `$(...)` into the Shares table and the flash-identity line — Markdown
+honours it as a line break, so each row ended after its first cell and the table
+stopped being a table. Report-changing for exactly one host class, which is what
+a number is for.
 
 **v6** is the queue batch: C-005 (os-release parsed, not sourced), C-016 +
 A-007 (one `lsblk -P` capture, and a megaraid probe that skips the USB boot
@@ -227,10 +234,10 @@ What changed in each version is the *Done* list in
 the header comment and that `printf` — and T1 fails if the two ever disagree,
 which is how a stale `collector:` misfiling every report gets caught.
 
-**Every version is also a git tag, and a tag never moves.** `v6` points at the
+**Every version is also a git tag, and a tag never moves.** `v7` points at the
 commit that minted it and keeps pointing there after `main` has moved on. A
-change that alters the report earns `v7` and its own tag, never a re-cut `v6` —
-a host that already fetched would go on running the old one and say `v6` either
+change that alters the report earns `v8` and its own tag, never a re-cut `v7` —
+a host that already fetched would go on running the old one and say `v7` either
 way. Docs, tests and hooks change under a tag without minting one; the collector
 is what the tag is for.
 
@@ -238,7 +245,7 @@ Pin a sweep so a month of reports cannot straddle a bump:
 
 ```bash
 git -C /opt/hw-inventory fetch --tags
-git -C /opt/hw-inventory checkout v6     # detached HEAD, deliberately
+git -C /opt/hw-inventory checkout v7     # detached HEAD, deliberately
 sudo bash /opt/hw-inventory/hw-inventory.sh > "$(hostname)-$(date +%F).md"
 ```
 

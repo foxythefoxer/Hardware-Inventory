@@ -33,7 +33,7 @@ consider"; it means nothing left that has been agreed to.
 **FR-004 is the only item left, and what blocks it is an answer, not effort.**
 FT-006 wants the unprivileged-LXC half before the code is written; the
 whitebox-desktop half was answered on this machine on 2026-09-07. Everything
-else accepted has been implemented — v6, below.
+else accepted has been implemented — v7, below.
 
 **Read the ledger entry before implementing any of these FRs.** FR-004 is the
 one left; the note below applies to it, and applied to FR-001 and FR-002 when
@@ -53,6 +53,13 @@ not after.
 
 Verified against the file and covered by `tests/run.sh` where testable.
 
+- **FR-005** — the CR from Unraid's FAT32 `/boot` stripped in `row()` and in the
+  `ident.cfg` awk, which is why the Shares table rendered as one cell per line.
+  Issue #2, the first defect a real host found rather than a review. T4's two new
+  cases anchor a whole row `^...$` — a `grep` for the first cell passes against
+  the broken output, since the break lands after it. **FT-010** wants v7 confirmed
+  on the host that filed it, and asks the one thing a fixture cannot: whether
+  `/var/local/emhttp/*.ini` really are LF, as the awk table's missing guard assumes.
 - **C-005** — `/etc/os-release` parsed as `KEY=value` instead of sourced, which
   executed it as root on every run. T18 turns on a command substitution in
   `PRETTY_NAME`: sourced it collapses, parsed it stays literal.

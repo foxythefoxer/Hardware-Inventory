@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hw-inventory.sh v6 — emit a Markdown block describing this host.
+# hw-inventory.sh v7 — emit a Markdown block describing this host.
 #
 # Read-only. Collects nothing off-box, writes nothing, sends nothing.
 # Every command is a query. Deliberately absent: smartctl -t (self-tests),
@@ -174,9 +174,17 @@ warn() {
 # split the row into extra columns and shift every cell after it (C-004), so
 # each cell is escaped here rather than at ten call sites. Cells are data:
 # never pass a pre-built row through this.
+#
+# A cell is also one LINE, which is why the CR goes. Unraid's /boot is the FAT32
+# flash device, so /boot/config/*.cfg are CRLF: `awk -F=` leaves the CR on the
+# last field and `$(...)` strips trailing newlines but not a CR, so it rode into
+# the cell, where Markdown honours it as a line break and the row falls apart
+# after it (FR-005). Stripped here because /boot is not the only DOS-formatted
+# file this script may ever read; /var/local/emhttp is tmpfs and LF, which is
+# why the awk table below carries no such guard.
 row() {
   local c out=""
-  for c in "$@"; do out="${out}| ${c//|/\\|} "; done
+  for c in "$@"; do c=${c//$'\r'/}; out="${out}| ${c//|/\\|} "; done
   printf '%s|\n' "$out"
 }
 
@@ -289,7 +297,7 @@ yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
 printf 'collected: %s\n' "$(date '+%Y-%m-%d')"
-printf 'collector: hw-inventory.sh v6\n'
+printf 'collector: hw-inventory.sh v7\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 
@@ -714,7 +722,10 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
   fi
 
   if [ -r /boot/config/ident.cfg ]; then
-    kv2=$(awk -F= '$1=="NAME"||$1=="COMMENT"{gsub(/"/,"",$2); print $1"="$2}' /boot/config/ident.cfg 2>/dev/null | paste -sd', ' -)
+    # Not a table cell, so row()'s CR strip does not cover this one — and the
+    # CR lands between the value and paste's comma, which is what made the
+    # separator look misplaced in the report (FR-005).
+    kv2=$(awk -F= '$1=="NAME"||$1=="COMMENT"{gsub(/[\r"]/,"",$2); print $1"="$2}' /boot/config/ident.cfg 2>/dev/null | paste -sd', ' -)
     [ -n "$kv2" ] && printf 'Flash identity: `%s`\n\n' "$kv2"
   fi
 fi

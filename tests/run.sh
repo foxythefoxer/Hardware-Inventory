@@ -165,7 +165,8 @@ grep -q '^## Collection warnings' "$TMP/h.md" \
 head_ "T4  Unraid array parsing"
 
 sed -e "s#/var/local/emhttp#$FIX/unraid/emhttp#g" \
-    -e "s#/boot/config/shares#$FIX/unraid/shares#g" "$SCRIPT" > "$TMP/unraid.sh"
+    -e "s#/boot/config/shares#$FIX/unraid/shares#g" \
+    -e "s#/boot/config/ident.cfg#$FIX/unraid/ident.cfg#g" "$SCRIPT" > "$TMP/unraid.sh"
 bash "$TMP/unraid.sh" > "$TMP/u.md" 2>/dev/null
 
 grep -q 'CANARY_TOKEN_MUST_NOT_LEAK' "$TMP/u.md" \
@@ -192,6 +193,17 @@ grep -q 'STARTED' "$TMP/u.md" && ok "array state read" || bad "array state missi
 # free and quietly drops the suffix).
 grep -q '^| appdata | prefer |' "$TMP/u.md" && ok "share row: name from filename, cache policy read" \
   || bad "share row wrong — name derivation or cache policy"
+# FR-005. crlf.cfg and ident.cfg are CRLF, as everything on Unraid's FAT32 flash
+# device is. The CR survives `$(...)`, and Markdown honours it as a line break,
+# so the row used to end after its first cell. Assert the whole row on ONE line
+# — a `grep -q '| crlf | no'` alone passes on the broken output too, since the
+# break lands after the cell it checks.
+grep -q '^| crlf | no |  | mostfree | disk1 |$' "$TMP/u.md" \
+  && ok "CRLF share row stays on one line" \
+  || bad "CRLF share row broken — a CR is reaching the table"
+grep -q '^Flash identity: `NAME=FIXTURE_NAME,COMMENT=FIXTURE_COMMENT`$' "$TMP/u.md" \
+  && ok "CRLF flash identity joins on one line" \
+  || bad "flash identity wrong — a CR is reaching the joined line"
 
 # -------------------------------------------------------------- T5 proxmox ---
 head_ "T5  Proxmox LXC and VM parsing"
