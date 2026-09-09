@@ -53,6 +53,11 @@ not after.
 
 Verified against the file and covered by `tests/run.sh` where testable.
 
+- **FR-006** — the Docker container list rendered as a real Markdown table
+  through `row()`, same as every other multi-row section; was a code-fenced
+  dump of `docker ps -a`'s raw columns. Issue #3. Its cap moved from `cap()`'s
+  inline marker to a deferred footnote, since the marker would otherwise land
+  inside a table row.
 - **FR-005** — the CR from Unraid's FAT32 `/boot` stripped in `row()` and in the
   `ident.cfg` awk, which is why the Shares table rendered as one cell per line.
   Issue #2, the first defect a real host found rather than a review. T4's two new

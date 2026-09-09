@@ -1108,9 +1108,27 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
   DVER=$("${TMO[@]}" docker version --format 'Docker {{.Server.Version}}' 2>/dev/null)
   printf '%s\n' "$DVER"
   [ -z "$DVER" ] && warn '`docker version` returned nothing although the daemon answered `docker info`.'
-  echo
-  "${TMO[@]}" docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null | cap "$DOCKER_LIST_LIMIT" "container lines"
   printf '```\n\n'
+  # Container list as a real Markdown table (FR-006, issue #3): every other
+  # multi-row section (DIMMs, physical devices, array slots/shares, and this
+  # section's own Container networks table below) is a `| … |` table — this
+  # was the one section still dumped as `docker ps -a`'s raw fixed-width
+  # columns inside a code fence. Same source, same read, just parsed instead
+  # of piped straight through.
+  DPSRAW=$("${TMO[@]}" docker ps -a --format $'{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null)
+  DPSROWS=""
+  if [ -n "$DPSRAW" ]; then
+    while IFS=$'\t' read -r cname cimage cstatus cports; do
+      DPSROWS="${DPSROWS}$(row "$cname" "$cimage" "$cstatus" "${cports:-$NA}")
+"
+    done < <(printf '%s\n' "$DPSRAW" | head -n "$DOCKER_LIST_LIMIT")
+  fi
+  if [ -n "$DPSROWS" ]; then
+    printf '| Name | Image | Status | Ports |\n|---|---|---|---|\n%s\n' "$DPSROWS"
+  fi
+  if [ "$(printf '%s\n' "$DPSRAW" | wc -l)" -gt "$DOCKER_LIST_LIMIT" ]; then
+    printf -- '_(container list capped at %d containers; later containers are not shown above)_\n\n' "$DOCKER_LIST_LIMIT"
+  fi
   # Network + container IP for every container in one call. docker inspect
   # is read-only; container names are whitespace-free by construction, same
   # as the device/VMID lists elsewhere in this script.

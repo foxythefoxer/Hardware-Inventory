@@ -382,7 +382,7 @@ case "$1" in
   info) exit 0 ;;
   version) echo "Docker 27.0.0" ;;
   ps)
-    if [ "$4" = 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' ] || printf '%s' "$*" | grep -q 'table'; then
+    if printf '%s' "$*" | grep -q 'Ports'; then
       i=1; while [ "$i" -le 105 ]; do printf 'c%d\timg\tUp\t\n' "$i"; i=$((i+1)); done
     else
       i=1; while [ "$i" -le 105 ]; do printf 'c%d\n' "$i"; i=$((i+1)); done
@@ -419,12 +419,15 @@ grep -q 'MARKER-LEAKED-INTO-INSPECT' "$TMP/dock.md" \
   || ok "marker text never reached docker inspect"
 grep -q 'container network lookups capped at 100 containers' "$TMP/dock.md" \
   && ok "deferred marker present after the Docker section" || bad "deferred marker missing"
-# The VISIBLE container table (site 813) is a normal cap() consumer — it is
-# only CNAMES (818, word-split into docker inspect args) that cannot use an
-# inline marker. With 105 stub containers this table legitimately truncates,
-# so its own "--- truncated ---" line is expected, not a leak.
-grep -q -- '--- truncated at 100 container lines ---' "$TMP/dock.md" \
-  && ok "container table still gets its own inline cap() marker" || bad "container table marker missing"
+# The VISIBLE container table is a Markdown table now (FR-006, issue #3), so
+# its cap can no longer use cap()'s inline "--- truncated ---" line — that
+# text would land inside a table row. It gets the same deferred-footnote
+# treatment as CNAMES below, with distinct wording so the two are tellable
+# apart. With 105 stub containers this table legitimately truncates.
+grep -q 'container list capped at 100 containers' "$TMP/dock.md" \
+  && ok "container table gets its own deferred cap footnote" || bad "container table cap footnote missing"
+grep -q '| c1 | img | Up | — |' "$TMP/dock.md" \
+  && ok "container list rendered as a Markdown table row" || bad "container list not rendered as a Markdown table"
 # The deferred marker must come after the container-networks table, not
 # inside it — the table is Markdown, and this marker would corrupt a row.
 awk '/Container networks/{t=NR} /container network lookups capped/{m=NR} END{exit !(t>0 && m>0 && m>t)}' "$TMP/dock.md" \
@@ -447,15 +450,10 @@ cat > "$TMP/emptydocker/docker" << 'EMPTYEOF'
 case "$1" in
   info) exit 0 ;;
   version) echo "Docker 28.0.0" ;;
-  # Real docker prints the table header even with nothing to list, and prints
-  # nothing at all for the bare --format form. Both are reproduced: the header
-  # is exactly the "prints a banner with no records" shape that makes an
-  # emptiness test the wrong check elsewhere in this script.
-  ps)
-    if printf '%s' "$*" | grep -q 'table'; then
-      printf 'NAMES     IMAGE     STATUS    PORTS\n'
-    fi
-    ;;
+  # Real docker prints nothing for a bare --format with zero containers,
+  # whichever fields are requested — reproduced for both the (name-only)
+  # CNAMES_ALL call and the (name/image/status/ports) container-list call.
+  ps) ;;
   # Never reached while the CNAMES guard holds. If a later change drops it,
   # `docker inspect` runs with no container arguments — a usage error on real
   # docker. Detect that from the report, not stderr (T11's lesson: the script
@@ -491,6 +489,8 @@ grep -q 'INSPECT-CALLED-WITH-NO-CONTAINERS' "$TMP/ed.md" \
 # Section-output convention: absent hardware never leaves a bare table header.
 grep -q 'Container networks' "$TMP/ed.md" \
   && bad "empty container-networks table header emitted" || ok "no bare container-networks header"
+grep -q '| Name | Image | Status | Ports |' "$TMP/ed.md" \
+  && bad "empty container-list table header emitted" || ok "no bare container-list header"
 
 # --------------------------------------------------------- T13 hook: verbs ---
 # The read-only rule now has an enforcement layer as well as its prose, and a

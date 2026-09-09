@@ -368,6 +368,44 @@ v7. It changes the emitted report for one host class, which is what a version is
 
 ---
 
+### FR-006 — Docker container list rendered as a code-fenced text dump, not a table — accepted, done
+
+Issue #3. Every other multi-row section in the report — DIMMs, physical devices, Unraid
+array slots and shares, and the Docker section's own Container networks table a few lines
+below — is a real `| … |` Markdown table. The container list above it was the one
+exception: `docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'`
+piped straight into a fenced code block, `docker`'s own fixed-width columns and all. In a
+Markdown renderer that section alone comes out unstyled and non-wrapping, worst on the
+widest `Ports` values.
+
+**Not a second source.** Same `docker ps -a` invocation, reformatted: request the four
+fields tab-separated instead of `docker`'s own `table` layout, split on the tab, and run
+each row through the `row()` helper every other table already uses for `|`-escaping
+(C-004). `docker version` stays in its code fence — a single value, not tabular.
+
+The one wrinkle: the existing cap on this list (`DOCKER_LIST_LIMIT`, C-014) went through
+`cap()`, whose inline `--- truncated ---` line would now land inside a table row and break
+it. Given the same deferred-footnote treatment the `CNAMES`/Container-networks cap already
+uses (C-014's own site 818), with distinct wording — "container list capped" vs "container
+network lookups capped" — so the two are tellable apart in the rendered report.
+
+T11's stub had to change with it: it told the two `docker ps -a` calls (the four-field list
+and the name-only `CNAMES_ALL` used for the networks table) apart by the literal word
+`table` in the format argument, which this fix removes from the script entirely. It now
+keys on `Ports` instead, present only in the list call. T12's stub (zero containers) needed
+no such fork — real `docker` prints nothing for a bare `--format` with zero containers
+regardless of which fields are requested, which the fixed stub now reflects for both calls
+rather than only the one it previously special-cased.
+
+Suite 151/0, baseline 149/0 — two new assertions (table-row shape, no bare header on zero
+containers), one changed (footnote text in place of the old inline marker). No new host
+class needed: this is a render change on data every host already emits, verified against
+the existing 105-container T11 fixture (triggers the new footnote) and T12's zero-container
+one (confirms no bare header). Not filed in `FIELD-TESTS.md` — nothing here is
+host-specific.
+
+---
+
 ## Repository audits — `A-`
 
 Whole-repo audits for over-engineering, run against the working tree rather than a
