@@ -1,4 +1,15 @@
-# Universal Senior-Engineer Code Review Prompt (AI-Agnostic)
+# Universal Senior-Engineer Code Review Prompt (AI-Agnostic) — round 1
+
+> **Superseded. Do not use this for a new review.**
+> [`code-review-prompt-r2.md`](code-review-prompt-r2.md) is the current one.
+>
+> This is the prompt that produced the three `C-`/`G-`/`O-` reviews in this directory on
+> 2026-08-06, kept unedited because those documents are what the ledger's ids point back
+> at. It was written for a 651-line script in a repository that had no dispositions
+> ledger, no exit-code contract and no test suite, and it was pasted with its `# INPUT`
+> block left blank — so it says nothing about the read-only rule, asks for a `mktemp`
+> recommendation in §5, and carries its advice about long scripts in a usage note *below*
+> the fence, where nobody copying the prompt would see it. R2 §5 lists what changed.
 
 > Copy everything inside the fence below into Claude, ChatGPT, Grok, Gemini, Copilot, Llama, etc.
 > Paste your code (or attach the files) where indicated at the bottom.

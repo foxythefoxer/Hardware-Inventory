@@ -27,16 +27,27 @@ is a copy that drifts, and it has, three times.
 
 ## Pick the ID prefix
 
+**A prefix names a channel. Never a model, never a person.** Numbers are assigned
+here, at adjudication, in the order verdicts are written — a reviewer's own
+`F-001` is *provenance*, recorded inside the entry beside its vendor and model,
+not the id. One channel, one namespace, forever.
+
+The reason is that channels repeat and models do not persist. A rejection filed
+under a model's name stops being findable by the next model, and then it gets
+re-proposed and re-argued. `C-`/`G-`/`O-` are the counter-example and the lesson:
+three models reviewed on one day under three per-model prefixes, which then had
+to be renumbered wholesale (`86e6c05`) and left a namespace that can never grow.
+
 | Prefix | Channel |
 |---|---|
-| `C-` `G-` `O-` | The three code reviews in `docs/reviews/` — Claude, Grok, GPT. A closed set: one prompt, three models, one day. Numbering does not correspond across them, which is why the prefixes exist. |
+| `R2-` | The **second code-review round** — one namespace for the whole round however many models run it. `docs/reviews/code-review-prompt-r2.md` is the prompt and the upload manifest. Open-ended: `R3-` for the round after. |
 | `FR-` | A request from outside the review cycle, filed as a GitHub issue. Open-ended. |
 | `A-` | A whole-repo audit run against the working tree. Open-ended. |
+| `CI-` | A finding from the suite running on a GitHub runner. A separate channel because it is a separate host class — nobody read the code to find these, the code ran somewhere that is not this machine and disagreed. Open-ended. |
+| `C-` `G-` `O-` | **Closed.** The three round-one reviews in `docs/reviews/` — Claude, Grok, GPT, 2026-08-06. Numbering does not correspond across them, which is why three prefixes exist. Do not add to these; a new review round is `R2-`. |
 
-`A-` is keyed to the **channel, not the model that ran the audit**. Audits
-repeat; a rejection filed under a model's name stops being findable by the next
-model, and then it gets re-proposed and re-argued. `C-`/`G-`/`O-` name a
-reviewer identity only because that set is closed and can never grow.
+Adding a channel is a one-line addition to this table plus one to the stream list
+at the top of `docs/DISPOSITIONS.md`. Do not reach for a per-model prefix again.
 
 ## The rule that keeps breaking
 

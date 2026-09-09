@@ -34,7 +34,7 @@ export LC_ALL=C
 # to extracting a single known-shape value — see the bare `head -1` sites at
 # dmi(), the Proxmox VE identity line, and the default route) has a named
 # constant here, consumed through cap() below instead of head directly, so a
-# hit limit grows a visible marker instead of vanishing silently (F-014).
+# hit limit grows a visible marker instead of vanishing silently (C-014).
 #
 # Two sites that share a NUMBER are not merged into one constant unless they
 # also share a PURPOSE: MegaCLI's physical-drive listing and df's table cap

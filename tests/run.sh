@@ -330,7 +330,7 @@ grep -q 'rd.iscsi.initiator=iqn.1994-05' "$TMP/k.md" \
   && ok "non-secret iscsi params untouched" || bad "over-redacted rd.iscsi.initiator"
 
 # ------------------------------------------------------------ T10 cap() ------
-# F-014. systemctl --failed exercises cap() via SYSTEMD_FAILED_LINES=20: no
+# C-014. systemctl --failed exercises cap() via SYSTEMD_FAILED_LINES=20: no
 # root gate, plain fenced text, easy to script both directions with.
 head_ "T10  Output-cap markers (cap())"
 
@@ -369,7 +369,7 @@ UNDER_UNITS=$(grep -c '^bad[0-9]*\.service' "$TMP/cap_under.md")
 [ "$UNDER_UNITS" -eq 3 ] && ok "3-line stub: byte-identical line count (3)" || bad "3-line stub: got $UNDER_UNITS lines, expected 3"
 
 # ------------------------------------------------------- T11 CNAMES safety ---
-# F-014's sharpest edge case: CNAMES is word-split into `docker inspect`
+# C-014's sharpest edge case: CNAMES is word-split into `docker inspect`
 # arguments, so cap()'s inline marker cannot be used there without a marker
 # line becoming a bogus container name. Assert the marker is deferred to
 # after the container-networks table AND never reaches `docker inspect`.

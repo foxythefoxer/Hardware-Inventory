@@ -1,22 +1,29 @@
 # Maintainer dispositions
 
 Every proposal about `hw-inventory.sh` that has been adjudicated, with the reasoning that
-produced the verdict. Two streams share this ledger, told apart by ID prefix:
+produced the verdict. Several streams share this ledger, told apart by ID prefix.
 
-- **`C-` Claude Opus 5, `G-` Grok 4.5, `O-` GPT-5.5** — findings from the three code
-  reviews in [`reviews/`](reviews/). A closed set: one prompt, three models, 2026-08-06.
-  Numbering does not correspond across those documents, which is why the prefixes exist.
+**A prefix names a channel, never a model.** Numbers are assigned here, at adjudication,
+in the order verdicts are written; a reviewer's own `F-001` is provenance recorded inside
+the entry beside its vendor and model, not the id. A channel repeats and a model does
+not persist, so a rejection filed under a model's name stops being findable by the next
+model — and then it gets re-proposed and re-argued.
+
+- **`R2-`** — the second code-review round: [`reviews/code-review-prompt-r2.md`](reviews/code-review-prompt-r2.md)
+  is the prompt and the upload manifest. **One namespace for the whole round**, however
+  many models run it. Open-ended; `R3-` for the round after.
 - **`FR-`** — requests submitted from outside the review cycle, filed as GitHub issues by a
   session working in a private notes vault. Open-ended; new ones land here.
 - **`CI-`** — findings from the suite running on a GitHub runner. A separate channel
   because it is a separate host class: nobody read the code to find these, the code ran
   somewhere that is not this machine and disagreed.
 - **`A-`** — findings from a whole-repo audit run against the working tree, as opposed to a
-  review of a snapshot or a request for a feature. Open-ended, and deliberately keyed to
-  the *channel* rather than to whichever model ran it: an audit is repeatable, so the next
-  run must land in the same namespace as the last one or its rejections stop being
-  findable. This is why they are not `C-`/`G-`/`O-`, which name a reviewer identity in a
-  closed set of three.
+  review of a snapshot or a request for a feature. Open-ended.
+- **`C-` Claude Opus 5, `G-` Grok 4.5, `O-` GPT-5.5** — findings from the three round-one
+  reviews in [`reviews/`](reviews/). **Closed:** one prompt, three models, 2026-08-06.
+  Numbering does not correspond across those documents, which is why three prefixes
+  exist — and that is the mistake the rule above exists to prevent repeating. They had to
+  be renumbered wholesale once already (`86e6c05`). Do not add to them.
 
 The instruction files carry only the one-line verdict per ID and point here; this file is
 opened when the reasoning is actually wanted. **Write the full adjudication here, then the

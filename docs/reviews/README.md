@@ -12,8 +12,12 @@ one-letter-per-reviewer scheme the ledger uses. The documents themselves still s
   each file carries a header saying so. Use them to understand *why* a finding was
   raised, never to locate code.
 - **These are AI-generated and unedited.** Three models were given the same prompt
-  (`code-review-prompt-template.md`) and the script, with **zero context** about the
-  target environment, the design constraints, or what had already been decided.
+  (`code-review-prompt-r1.md`) and the script, with **zero context** about the
+  target environment, the design constraints, or what had already been decided. That was
+  deliberate, and it bought independence when there was nothing yet to be independent
+  *of*. It does not any more: two of the three recommended `set -o pipefail`, which
+  measures exit `141` against this script. `code-review-prompt-r2.md` supplies the
+  rejection list for exactly that reason.
 - **Finding IDs are per-reviewer and do not correspond across documents.** Claude's
   F-001 is a locale issue; Grok's F-001 is brace expansion; GPT's F-001 is loop
   iteration. The old advice here was to cross-reference by line number instead — that
@@ -33,10 +37,14 @@ only them.
 
 | File | What it is |
 |---|---|
-| `code-review-prompt-template.md` | The prompt given to all three models |
+| `code-review-prompt-r2.md` | **The prompt to use for the next review.** Includes the upload manifest for a web session with no repository access |
+| `code-review-prompt-r1.md` | The prompt given to all three models below. Superseded; kept because these documents are what it produced |
 | `code-review-summary--anthropic--claude-opus-5--*` | Summary + detailed, 35 findings |
 | `code-review-summary--xai--grok-4-5--*` | Summary + detailed, 7 findings |
 | `code-review-summary--openai--gpt-5-5--*` | Summary + detailed, 3 findings |
+
+A second round files under one `R2-` prefix for the whole round, not one per model — see
+§4 of the R2 prompt, and "Pick the ID prefix" in `/adjudicate`.
 
 ## What the exercise was worth
 
