@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hw-inventory.sh v7 — emit a Markdown block describing this host.
+# hw-inventory.sh v8 — emit a Markdown block describing this host.
 #
 # Read-only. Collects nothing off-box, writes nothing, sends nothing.
 # Every command is a query. Deliberately absent: smartctl -t (self-tests),
@@ -7,6 +7,10 @@
 # systemctl start/stop, and any package operation. Unraid array state is read
 # from emhttp's own .ini files rather than via `mdcmd`, which would mean
 # writing a command into /proc/mdcmd — a read-only script should not do that.
+# The RAID CLIs are the same rule from the other direction: their verb is
+# `show`, but they write a command log into the working directory unless
+# passed `nolog` (storcli/perccli) or -NoLog (MegaCLI), so a query writes
+# without a banned verb anywhere in it.
 #
 # Run as root where possible: dmidecode (model, DIMM layout) and smartctl
 # (disk health) need it. Without root the script still runs and marks those
@@ -297,7 +301,7 @@ yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
 printf 'collected: %s\n' "$(date '+%Y-%m-%d')"
-printf 'collector: hw-inventory.sh v7\n'
+printf 'collector: hw-inventory.sh v8\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 
@@ -565,15 +569,21 @@ if [ -n "$RAIDCTL" ]; then
 
   if [ -n "$RCLI" ]; then
     # /call = all controllers, /vall = all virtual drives, /eall/sall = all
-    # physical drives on all enclosures. All read-only.
+    # physical drives on all enclosures — all show-class verbs.
+    #
+    # `nolog` is load-bearing, not noise (R2-001). This CLI family writes a
+    # command log — storcli.log, perccli.log — into the working directory on
+    # every invocation unless told not to, so the read verb still writes. No
+    # banned-verb list can catch that, because the verb really is `show`; T1
+    # greps for the keyword instead. MegaCLI spells it -NoLog, below.
     printf '#### Controller and array topology\n\n```\n'
-    tmo 25 "$RCLI" /call show 2>/dev/null | cap "$RAID_CLI_SUMMARY_LINES" "controller summary lines"
+    tmo 25 "$RCLI" /call show nolog 2>/dev/null | cap "$RAID_CLI_SUMMARY_LINES" "controller summary lines"
     echo
     echo "--- virtual drives ---"
-    tmo 25 "$RCLI" /call/vall show 2>/dev/null | cap "$RAID_CLI_SUMMARY_LINES" "virtual drive lines"
+    tmo 25 "$RCLI" /call/vall show nolog 2>/dev/null | cap "$RAID_CLI_SUMMARY_LINES" "virtual drive lines"
     echo
     echo "--- physical drives ---"
-    tmo 25 "$RCLI" /call/eall/sall show 2>/dev/null | cap "$RAID_CLI_DRIVES_LINES" "physical drive lines"
+    tmo 25 "$RCLI" /call/eall/sall show nolog 2>/dev/null | cap "$RAID_CLI_DRIVES_LINES" "physical drive lines"
     printf '```\n\n'
   elif have megacli || have MegaCli64; then
     MCLI=$(command -v megacli 2>/dev/null || command -v MegaCli64 2>/dev/null)

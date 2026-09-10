@@ -92,6 +92,24 @@ else
   ok "no writes to /proc, /sys, /dev"
 fi
 
+# A vendor RAID CLI writes a command log into the working directory unless told
+# not to, so its `show` verb still writes (R2-001). The banned-verb grep above
+# cannot catch that — the verb genuinely is read-only — so check for the
+# keyword instead. This is the whole reason a verb list is not sufficient on its
+# own, and it is the same lesson as the fastfetch rejection from the other side.
+#
+# Comments are stripped; quoted strings are NOT, because strip() blanks "$RCLI"
+# to "" and would hide every call site there is. Matches invocations only: the
+# variable or the binary followed by its first / or - argument, which excludes
+# the `command -v` assignment, the `[ -n ]` guard and the `for c in ...` list.
+RAIDCALL='("\$(RCLI|MCLI)"|(perccli|storcli|megacli|MegaCli)[0-9]*)[[:space:]]+[-/]'
+if sed 's/#.*//' "$SCRIPT" | grep -nE "$RAIDCALL" | grep -qivE 'nolog'; then
+  bad "RAID CLI invoked without nolog — a show verb that still writes a log file:"
+  sed 's/#.*//' "$SCRIPT" | grep -nE "$RAIDCALL" | grep -ivE 'nolog' | sed 's/^/        /'
+else
+  ok "every RAID CLI call suppresses its log file"
+fi
+
 # Same strip() as the banned-verbs check above: a comment that names
 # `set -o pipefail` to explain why it's avoided (see cap() in the script)
 # is documentation, not the directive itself.
@@ -541,7 +559,15 @@ else
   try 0 'allows findmnt'               'findmnt -rno TARGET,SOURCE'
   try 0 'allows smartctl -H -A'        'smartctl -H -A -n standby /dev/sda'
   try 0 'allows ipmitool sel list'     'ipmitool sel list last 20'
-  try 0 'allows storcli show'          'storcli64 /c0 show all'
+  # A show verb that still writes: the CLI logs to the working directory unless
+  # the keyword is there, so both halves are asserted (R2-001).
+  try 2 'blocks storcli sans nolog'    'storcli64 /c0 show all'
+  try 0 'allows storcli with nolog'    'storcli64 /c0 show all nolog'
+  try 0 'allows megacli with -NoLog'   'MegaCli64 -LDInfo -Lall -aALL -NoLog'
+  # NORM splits on `|`, so a grep alternation puts a bare `megacli` in command
+  # position. The first draft of the check above matched the bare word and
+  # blocked this, on a command this repo actually runs.
+  try 0 'allows a CLI name in a regex' "bash tests/run.sh | grep -E 'storcli|megacli'"
   try 0 'allows mountpoint'            'mountpoint -q /mnt'
   # A verb named in order to reject it is documentation, not an invocation —
   # the same reason T1 strips comments before its own banned-verb grep.

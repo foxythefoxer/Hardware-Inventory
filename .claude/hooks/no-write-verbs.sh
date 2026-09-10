@@ -93,6 +93,26 @@ check '^(pct|qm)[[:space:]]+(start|stop|shutdown|set|create|destroy|clone|enter|
   'that pct/qm verb changes a guest. Only list, config and status are used.'
 check '^(perccli|perccli64|storcli|storcli64|megacli|MegaCli|MegaCli64)\b.*([[:space:]]|/)(add|del|delete|set|start|stop|create|import|erase|insert|flash|locate|spinup|spindown)\b' \
   'that is a write verb on a RAID controller CLI. Only show-class verbs are allowed.'
+
+# The one write on this list that no verb pattern can express, because the verb
+# is not the problem (R2-001). This CLI family writes a command log into the
+# working directory on every invocation unless told not to, so `show` — the
+# read verb — still writes. Checking for the absence of the suppressing keyword
+# is the only shape that catches it, which is why the guard is inverted here.
+# A nolog anywhere in the command excuses the whole command: NORM has already
+# split it into fragments and pairing them up buys nothing a session guard
+# needs. T1 is the precise gate, against the script itself.
+#
+# The trailing [-/] is required, not decoration. Every other pattern here names
+# a verb after the binary; this one cannot, so without that argument it matches
+# a bare word — and NORM splits on `|`, which promotes the `megacli` inside a
+# grep alternation to command position. That fired on this repo's own tooling
+# the first time it ran. A real invocation always carries /cx or -Flag; a
+# mention never does, and a matcher that refuses ordinary work gets switched
+# off, which is the failure this whole file is trying not to have.
+grep -qiE '(^|[[:space:]])-?no-?log([[:space:]]|$)' <<<"$NORM" \
+  || check '^(perccli|perccli64|storcli|storcli64|megacli|MegaCli|MegaCli64)\b[[:space:]]+[-/]' \
+       'a RAID controller CLI writes a command log into the working directory unless told not to, so even its show verbs write. Pass nolog (storcli/perccli) or -NoLog (MegaCLI).'
 check '^ipmitool\b.*\b(chassis|raw|power|mc[[:space:]]+reset|sel[[:space:]]+clear|user[[:space:]]+set|lan[[:space:]]+set|sol[[:space:]]+(activate|set))\b' \
   'that ipmitool verb changes BMC or chassis state. Only mc info, lan print, sdr and sel list are used.'
 check '^(apt|apt-get|aptitude)[[:space:]]+.*\b(install|remove|purge|upgrade|full-upgrade|dist-upgrade|autoremove)\b|^(dnf|yum|zypper)[[:space:]]+.*\b(install|remove|erase|upgrade|update)\b|^pacman[[:space:]]+-[A-Za-z]*[SRU]|^(apk|emerge|snap|flatpak)[[:space:]]+.*\b(add|install|remove|del)\b' \
