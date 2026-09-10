@@ -610,6 +610,11 @@ is, and the only channel that reports from one automatically. Kept out of `A-` b
 these are not audit findings — nobody read the code to find them, the code ran somewhere
 else and disagreed.
 
+**Widened at CI-005** to any host class this machine is not, runner or estate. The channel
+was named for the mechanism that first reported from elsewhere; the substance is the last
+clause above, and a [`FIELD-TESTS.md`](FIELD-TESTS.md) return is the same channel by hand.
+A runner has no BMC and no RAID controller, so it cannot produce this class at all.
+
 ### CI-001 — the PCI section warns on filtered-empty output — accepted, done
 
 **Every run of this workflow, from the first, was red for this one reason.** Three
@@ -792,6 +797,48 @@ a branch. This one says **a green tick belongs to a commit _on a runner_** — t
 mixed, as CI-003 itself found on T6's disk topology, and a test that reads the host will
 eventually read a different one. `main` was green here on the exact commit merged, and the
 rule was followed; the rule was not enough, because the test was a coin flip.
+
+### CI-005 — T10's under-cap assertion read the whole report, not its own section — accepted, done
+
+Issue #4, and **CI-004's class a fourth time.** Reported by the operator running the `v7`
+suite as root on a server with a BMC and a MegaRAID controller — the first time this suite
+has run against real privileged server hardware — as `107 passed, 1 failed`, the failure
+being `3-line stub: marker present despite no truncation`. Green on a desktop, green in
+CI, green here.
+
+**Mechanism, and the issue's own unconfirmed part is now measured.** T10's under-cap half
+stubs `systemctl` with three failed units, runs the **whole script live**, and asserts that
+nothing was truncated — by grepping the entire report for `--- truncated`. `cap()` has
+roughly twenty other call sites (RAID controller matches, vendor-CLI drive lists, `racadm`,
+IPMI sensors, PCI devices, filesystem tables). Any one of them truncating *correctly* on a
+host with enough hardware fails a test about systemd. Reproduced here without that
+hardware, by stubbing `systemctl` under its 20-line cap and `lspci` over its 60-line cap:
+exit `0`, stderr empty, report-wide grep **1 hit** — `--- truncated at 60 PCI device lines
+---` — and the systemd section itself **0**. The issue declined to name which site fired on
+that host; the answer is that it does not matter, which is the finding.
+
+**Fixed by scoping the assertion to the section under test**, `sed -n '/^### Failed systemd
+units/,/^##[^#]/p'` and then the same grep. Deliberately not by pinning the marker's noun
+(`--- truncated at 20 failed unit lines ---`, as the over-cap half already does): that
+would pass a marker leaking into this section under any *other* wording, and the claim
+being made is about the section, not about one string.
+
+Verified by mutation, reverted after: `cap()` forced to emit its marker unconditionally
+turns the scoped assertion red while the over-cap half stays green — so the fix narrowed
+the assertion without deleting what it checks.
+
+**CI-004 fixed this shape for exit codes and left it standing for content.** Its rule was
+already the right one — *assert the test's own claim by name, scoped* — but it swept only
+the assertions that turned on `$RC`, and this one turns on a substring. When a test
+prepends stubs to `$PATH`, **everything it does not stub is the host talking**, on any
+channel, not just the exit code. The two remaining assertions in that block are safe for
+the reason this one was not: they match strings the stub itself invented
+(`bad3.service`, and the 20-line marker's own noun).
+
+And no runner could have caught it: this needs a populated BMC or a real controller, which
+is what [`FIELD-TESTS.md`](FIELD-TESTS.md) FT-007 exists to reach. It found a suite defect
+on its first real run, which is the argument for that entry being standing rather than
+one-shot.
 
 ---
 

@@ -381,7 +381,13 @@ grep -q -- '--- truncated at 20 failed unit lines ---' "$TMP/cap_over.md" \
 # marker included (i.e. NOT included), or every untruncated section in the
 # report grows a spurious line.
 grep -q 'bad3.service' "$TMP/cap_under.md" && ok "3-line stub: real output present" || bad "3-line stub: real output missing"
-grep -q -- '--- truncated' "$TMP/cap_under.md" \
+# Scoped to the section under test, not the whole report — CI-005, and CI-004's
+# rule again. Only `systemctl` is stubbed here; every other collector runs live,
+# and cap() has ~20 other call sites. A host with a real RAID controller or a
+# populated BMC truncates one of those *correctly*, and a report-wide grep reads
+# that as this section growing a spurious marker (issue #4, measured on a
+# PowerEdge with iDRAC and a MegaRAID controller).
+sed -n '/^### Failed systemd units/,/^##[^#]/p' "$TMP/cap_under.md" | grep -q -- '--- truncated' \
   && bad "3-line stub: marker present despite no truncation" || ok "3-line stub: no marker below the cap"
 UNDER_UNITS=$(grep -c '^bad[0-9]*\.service' "$TMP/cap_under.md")
 [ "$UNDER_UNITS" -eq 3 ] && ok "3-line stub: byte-identical line count (3)" || bad "3-line stub: got $UNDER_UNITS lines, expected 3"
@@ -797,11 +803,24 @@ grep -q 'UPSCABLE=usb' "$TMP/ups.md" && ok "apcupsd config read" || bad "apcupsd
 # stripped PATH, reused so that upower and apcaccess are genuinely absent, and
 # the config path is pointed at nothing — without both, this half passes or
 # fails depending on what happens to be installed on whoever's machine runs it.
+#
+# power_supply is redirected for the same reason, and it is the third input this
+# half was silently reading off the live host. A laptop is the false-positive
+# shape (measured: `AC`, `BAT0` and two USB-C PD source entries, and no UPS
+# section — FT-002b): every other negative case here is negative because the
+# directory is *empty*, which proves nothing about a populated one. The gate is
+# `grep -lx UPS */type`, so a battery must miss on its type string, not on the
+# absence of the tree. The real PD nodes carry a colon (`USBC000:001`); the
+# fixture drops it so the tree clones on any filesystem.
 sed -e "s#/sys/bus/usb/devices#$TMP/no-such-usb#g" \
+    -e "s#/sys/class/power_supply#$FIX/power_supply#g" \
     -e "s#/etc/apcupsd/apcupsd.conf#$TMP/no-such-apcupsd.conf#g" "$SCRIPT" > "$TMP/noups.sh"
 PATH="$TMP/minbin" bash "$TMP/noups.sh" > "$TMP/noups.md" 2>/dev/null
 grep -q '^### UPS' "$TMP/noups.md" \
-  && bad "UPS section printed with no UPS present" || ok "silent when no UPS is detected"
+  && bad "UPS section printed with a battery but no UPS" || ok "silent when no UPS is detected"
+grep -qE 'BAT0|ucsi-source-psy' "$TMP/noups.md" \
+  && bad "a battery or a USB-C PD source was reported as a UPS signal" \
+  || ok "battery and USB-C PD power_supply entries are not UPS signals"
 
 # R2-002. `upower -e` is a D-Bus call and UPower ships an activation file, so on
 # a host with the daemon installed and stopped it starts it — a query that

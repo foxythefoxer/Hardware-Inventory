@@ -231,7 +231,14 @@ What the suite covers, and why each case is shaped the way it is:
    their block half: a matcher that refuses `zpool list` or a documentation-range
    MAC gets switched off within a day, and then nothing is enforcing anything.
    T14 also runs every tracked file through the leak matcher.
-9. **Never assert a bare exit code against the live host** (CI-004). A test whose
+9. **Never assert anything about the live host** (CI-004, CI-005). Where a test
+   prepends stubs to `$PATH`, everything it did not stub is the host talking —
+   on every channel, not just the exit code. CI-005 is the content half: T10's
+   under-cap assertion grepped the *whole report* for `--- truncated`, and one of
+   `cap()`'s ~20 other sites truncating correctly on a server with a BMC and a
+   RAID controller failed a test about systemd. Scope every assertion to the
+   section, or match a string the stub itself invented. **Never assert a bare
+   exit code against the live host** is the same rule's first half. A test whose
    stubs are *prepended* to `$PATH` leaves every other collector on the runner
    live, so `[ $RC -eq 0 ]` asserts that machine has nothing degraded — and an
    unprivileged `lspci` that enumerates nothing warns, correctly, and fails a
