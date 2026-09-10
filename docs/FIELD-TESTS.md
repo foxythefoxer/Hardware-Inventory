@@ -341,6 +341,29 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   directory is empty after **both** runs, say so — that means this fix was a no-op on this
   version and the entry should say which version.
 
+### FT-012 — does `upower -e` start the daemon it queries? (R2-002)
+
+- **Needs:** a host with `upower` installed, systemd, a system bus, and `upowerd`
+  **stopped**. A headless server or VM is the likely class; a desktop has it running.
+- **Why not here:** `upowerd` runs on the development host, so the activation is inferred
+  from UPower's D-Bus service file rather than measured. R2-002 already gated the probe —
+  the gate is safe whichever way this comes back — so this confirms the mechanism for the
+  record, and says whether the gate could ever be dropped again.
+- **Run:**
+  ```bash
+  systemctl is-active upower; echo "--- before ---"
+  bash hw-inventory.sh >/dev/null 2>&1
+  systemctl is-active upower; echo "--- after ---"
+  ```
+  If they differ, stop the daemon again (`sudo systemctl stop upower`) and re-run with the
+  v8 tag checked out to confirm it is the script and not something else on the host.
+- **Run as:** unprivileged is enough and is the more honest test — nothing in the UPS
+  section is root-gated, and D-Bus activation does not need root.
+- **Send back:** the two words. `inactive` then `active` means the finding is confirmed and
+  the gate is load-bearing; `inactive` twice means v8 activated nothing on this version and
+  the gate is cheap insurance rather than a fix. Either answer is useful and neither needs
+  a report.
+
 ### FT-007 — the root half, on hardware that has any (standing)
 
 - **Needs:** any host you can `sudo` on, and ideally one with a BMC, a

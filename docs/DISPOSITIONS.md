@@ -197,6 +197,10 @@ be layered rather than assume a tool:
   not depend on the daemon answering; `/etc/apcupsd/apcupsd.conf` records the configured
   intent independent of daemon state. `upower -e` / `-i` are reads and are allowed as a
   third signal, though they yield little on a headless host with no session.
+  **Amended by R2-002.** That last sentence is true of the call and false of its
+  consequence: `upower` is a D-Bus client and UPower ships an activation file, so on a
+  host where the daemon is stopped the call starts it. The probe is now gated on the
+  daemon already running. Read this condition through R2-002, not as written here.
 - **It must never `warn`, and it stays silent when nothing is found.** Most hosts have
   no UPS. Emitting "no UPS detected" would break the standing rule that a section prints
   only if non-empty; absence of the section is the negative answer, exactly as it is for
@@ -851,6 +855,49 @@ degradation, not a violation, so the fix is still the right direction while unco
 
 155 passed, 0 failed. ShellCheck skips on this host and runs in CI; the change to the
 script itself is three words, a comment and the version.
+
+### R2-002 — `upower -e` activates `upowerd` over D-Bus — accepted, done
+
+Provenance: Claude Opus 5's `F-002`, HIGH.
+
+**The second read verb that changes the host, found in the same review as the first.**
+`upower` is a D-Bus client. UPower ships
+`/usr/share/dbus-1/system-services/org.freedesktop.UPower.service` carrying
+`SystemdService=upower.service`, so on a host where the daemon is installed and stopped,
+the call activates it and it stays running, polling power-supply devices. `upower -e` reads;
+what it triggers does not.
+
+**This contradicts a supplied document, with new evidence, which is the bar the R2 prompt
+set for doing so.** FR-002's condition reads "`upower -e` / `-i` are reads and are allowed
+as a third signal". That entry is amended in place with a pointer here rather than
+rewritten — it is a record of what was argued, and what was argued was true of the call
+and silent about the activation.
+
+**Gated, not deleted.** `systemctl is-active` is a query and activates nothing, so it is
+the gate. Deletion was the alternative and is still available: FR-002 makes sysfs the gate
+for this section and calls UPower the third and weakest signal. Gating was chosen because
+it keeps an adjudicated feature working where it is free, and reversing an accepted
+product decision is a larger step than the defect required.
+
+**Nothing real is lost behind the gate**, which is why it did not need to wait on the field
+test. Daemon running: identical data. Daemon stopped and the call activates it: the only
+data lost is an artifact of our own side effect. Daemon stopped and the reviewer is wrong
+about activation: `upower -e` had nothing to report anyway. The one genuine loss is a host
+running `upowerd` outside systemd, which now goes silent — the price of not opening a bus
+connection to find out.
+
+**Verified by mutation:** the ungated copy fails the stopped-daemon assertion and still
+passes the running-daemon one, so both halves of T16's new pair are load-bearing.
+
+**T10 caught a defect in the fix itself, and the reason is worth keeping.** The gate runs
+in an `if` condition, where only stderr was redirected — so `systemctl`'s stdout went into
+the report. Real `is-active --quiet` prints nothing; T10's stub ignores its arguments and
+answered with 25 lines, which landed in the output and broke a test about `cap()`. `--quiet`
+is the tool's promise and the redirect is ours, which is the same reasoning the read-only
+rule already applies to a dependency's flags. 157 passed, 0 failed.
+
+**Not verified here:** this host runs `upowerd`, so the activation itself is inferred from
+the unit file rather than measured. **FT-012** asks for the two-command answer.
 
 ---
 

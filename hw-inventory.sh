@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hw-inventory.sh v8 — emit a Markdown block describing this host.
+# hw-inventory.sh v9 — emit a Markdown block describing this host.
 #
 # Read-only. Collects nothing off-box, writes nothing, sends nothing.
 # Every command is a query. Deliberately absent: smartctl -t (self-tests),
@@ -301,7 +301,7 @@ yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
 printf 'collected: %s\n' "$(date '+%Y-%m-%d')"
-printf 'collector: hw-inventory.sh v8\n'
+printf 'collector: hw-inventory.sh v9\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 
@@ -971,8 +971,21 @@ if have apcaccess; then
   [ -n "$APCS" ] && UPSROWS="${UPSROWS}$(kv "apcaccess" "$APCS")
 "
 fi
-# A third signal, and a read. Yields little on a headless host with no session.
-if have upower; then
+# A third signal, and the call itself is a read — but `upower` is a D-Bus client
+# and UPower ships an activation file naming SystemdService=upower.service, so
+# where the daemon is installed and stopped this STARTS it (R2-002). A query
+# that changes the host is still a change. `systemctl is-active` activates
+# nothing, so it is the gate, and nothing real is lost behind it: a stopped
+# daemon has no state to report that did not come from us starting it. A host
+# running upowerd outside systemd goes silent here, which is the price of not
+# opening a bus connection to find out. Yields little either way — sysfs is the
+# gate for this section, per FR-002.
+# `--quiet` states the intent; the redirect is what enforces it. A gate in an
+# `if` condition writes its stdout into the report unless told otherwise, and
+# the flag is the tool's promise rather than ours — T10 caught exactly that,
+# because its stub ignores arguments and answered with 25 lines.
+if have upower && have systemctl \
+   && "${TMO[@]}" systemctl is-active --quiet upower >/dev/null 2>&1; then
   UPWR=$("${TMO[@]}" upower -e 2>/dev/null | grep -i 'ups' | paste -sd', ' -)
   [ -n "$UPWR" ] && UPSROWS="${UPSROWS}$(kv "UPower" "$UPWR")
 "

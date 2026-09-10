@@ -803,6 +803,32 @@ PATH="$TMP/minbin" bash "$TMP/noups.sh" > "$TMP/noups.md" 2>/dev/null
 grep -q '^### UPS' "$TMP/noups.md" \
   && bad "UPS section printed with no UPS present" || ok "silent when no UPS is detected"
 
+# R2-002. `upower -e` is a D-Bus call and UPower ships an activation file, so on
+# a host with the daemon installed and stopped it starts it — a query that
+# changes the host. The probe is gated on the daemon already running. Both
+# directions are asserted: a gate that never opens is indistinguishable from a
+# deleted probe, and would pass a test that only checked the stopped case.
+mkdir -p "$TMP/upsup" "$TMP/upsdown"
+for d in upsup upsdown; do
+  { printf '#!/bin/sh\n'
+    printf 'printf "/org/freedesktop/UPower/devices/ups_hiddev0\\n"\n'; } > "$TMP/$d/upower"
+  chmod +x "$TMP/$d/upower"
+done
+# is-active is the only verb that differs; --failed must stay empty and quiet in
+# both, or this test starts asserting the failed-units section instead.
+{ printf '#!/bin/sh\n'; printf '[ "$1" = is-active ] && exit 0\nexit 0\n'; } > "$TMP/upsup/systemctl"
+{ printf '#!/bin/sh\n'; printf '[ "$1" = is-active ] && exit 3\nexit 0\n'; } > "$TMP/upsdown/systemctl"
+chmod +x "$TMP/upsup/systemctl" "$TMP/upsdown/systemctl"
+
+PATH="$TMP/upsup:$PATH"   bash "$TMP/usb.sh" > "$TMP/ups_up.md"   2>/dev/null
+PATH="$TMP/upsdown:$PATH" bash "$TMP/usb.sh" > "$TMP/ups_down.md" 2>/dev/null
+grep -q '^| UPower |' "$TMP/ups_up.md" \
+  && ok "UPower read when the daemon is already running" \
+  || bad "no UPower row with upowerd active — the gate never opens"
+grep -q '^| UPower |' "$TMP/ups_down.md" \
+  && bad "UPower probed with upowerd stopped — that call would have activated it" \
+  || ok "UPower probe skipped when the daemon is stopped"
+
 # ------------------------------------------------------------------ T17 PCI --
 # CI-001. This reproduces a host class no machine here is: a VM whose NIC and
 # disks are paravirtual, so `lspci -nnk` prints a full listing that matches none
