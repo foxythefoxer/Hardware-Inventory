@@ -53,6 +53,11 @@ not after.
 
 Verified against the file and covered by `tests/run.sh` where testable.
 
+- **R2-001** — `nolog` passed to the three `perccli`/`storcli` calls, which otherwise
+  write `storcli.log` into the working directory: a `show` verb that writes, which is why
+  no banned-verb list could see it. T1 greps for the keyword instead of a verb, and T13's
+  case asserting the hole was correct is inverted. **FT-011** confirms the keyword is
+  accepted on a host that actually has the binary. v8.
 - **FR-006** — the Docker container list rendered as a real Markdown table
   through `row()`, same as every other multi-row section; was a code-fenced
   dump of `docker ps -a`'s raw columns. Issue #3. Its cap moved from `cap()`'s

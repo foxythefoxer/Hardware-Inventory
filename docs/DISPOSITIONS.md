@@ -791,6 +791,69 @@ rule was followed; the rule was not enough, because the test was a coin flip.
 
 ---
 
+## Code review round two — `R2-`
+
+One reviewer this round: **Anthropic Claude Opus 5**, 2026-09-09, against
+`34ca470a0f454abd4b1a85a3b979cda200f2d4ed` — v7, 1,205 lines. Both documents are in
+[`reviews/`](reviews/), committed unedited but for the Commit SHA cell each one instructed
+be filled in before filing. 27 findings: 1 CRITICAL, 3 HIGH, 7 MEDIUM, 11 LOW, 5 NITPICK.
+
+### R2-001 — `perccli`/`storcli` invoked without `nolog` — accepted, done
+
+Provenance: Claude Opus 5's `F-001`, CRITICAL, and the round's only ship-blocker.
+
+**A read verb that writes.** This CLI family writes a command log — `storcli.log`,
+`perccli.log` — into the **current working directory** on every invocation unless passed
+`nolog`. Three call sites ran without it, so `show` put a file on the host being
+inventoried. The report is normally written by a cron job into whatever directory that job
+happens to start in, which is where the log lands too.
+
+**The file already contained its own counter-example.** Verified: the MegaCLI branch
+eleven lines below passes `-NoLog` at both of its call sites and has since it was written.
+The same understanding of the same behaviour in the same class of tool simply did not
+reach the branch above it.
+
+**Why neither enforcement layer saw it.** This is the case `CLAUDE.md` names — "the ban
+covers the tool's config, not just its verb" — arriving from a direction that section did
+not anticipate. There the worry is a dependency that executes a config file at startup;
+here the tool reads no config and writes anyway. Both matchers are built on verbs:
+
+- **T1's `BANNED` grep** requires a write verb after the binary:
+  `(storcli|perccli|megacli)[^|]*(add|delete|set |start )`. `show` is not on that list and
+  should not be.
+- **`.claude/hooks/no-write-verbs.sh`** carried the same alternation — and **T13 asserted
+  the hole as correct**: `try 0 'allows storcli show' 'storcli64 /c0 show all'`. The suite
+  was not silent about this defect, it had a passing test for it.
+
+**The fix.** `nolog` at all three sites, a comment recording that it is load-bearing so it
+is not tidied away later, and the header's read-only paragraph extended to name the case.
+v8.
+
+**The check.** A verb list cannot express "missing keyword", so T1 greps for the keyword
+instead — against the raw file, not through `strip()`, which blanks `"$RCLI"` to `""` and
+would have hidden every call site. Verified by reverting: silent on the fixed file, names
+all three sites with `nolog` stripped, five with `-NoLog` stripped as well.
+
+**The hook's first draft was wrong, and how it failed is the finding under the finding.**
+Matching the bare binary name blocked `grep -E 'storcli|megacli'` in this repo's own
+tooling, because `NORM` splits on `|` and that promotes an alternation branch to command
+position. Requiring the first `/cx` or `-Flag` argument fixes it, and the false positive is
+now a T13 case. `.claude/rules/collectors.md` already states that a matcher which refuses
+ordinary work gets switched off within a day; this is the first time that rule was met by
+an actual misfire rather than by anticipating one.
+
+**Not verified here, and it cannot be.** No host in reach has `perccli64` or `storcli64`,
+so two claims rest on vendor documentation rather than measurement: that the log is written
+without the keyword, and that `nolog` is accepted on these three command forms. If some
+version rejects it the command fails, the section empties and the run warns — a
+degradation, not a violation, so the fix is still the right direction while unconfirmed.
+**FT-011** asks for both on a host with a controller.
+
+155 passed, 0 failed. ShellCheck skips on this host and runs in CI; the change to the
+script itself is three words, a comment and the version.
+
+---
+
 ## Verified reviewer claims
 
 Checked against ShellCheck 0.10.0 and the file itself:

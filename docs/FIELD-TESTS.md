@@ -304,6 +304,43 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   which is the part a fixture cannot answer — it says whether the `.ini` files
   really are LF, or whether the awk table needs the guard too.
 
+### FT-011 — does the RAID CLI write a log, and does it take `nolog`? (R2-001)
+
+- **Needs:** a host with `perccli64` or `storcli64` installed. A controller behind it is
+  ideal but not required — the question is about the tool, not the array.
+- **Why not here:** neither binary exists on any host in reach. R2-001 shipped on the
+  vendor documentation for two facts that nothing here can measure: that the CLI writes
+  `storcli.log` / `perccli.log` into the working directory without the keyword, and that
+  `nolog` is accepted on the three command forms the script actually uses. If some version
+  rejects it, those commands fail and the RAID section empties and warns — a degradation
+  rather than a violation, but one nobody would attribute to a one-word fix six months on.
+- **This is the one entry here that is not purely a read, and deliberately so.** It makes
+  an empty scratch directory to give the tool somewhere harmless to write, because seeing
+  whether it writes *is* the question. Nothing touches the controller: every command below
+  is a `show`.
+- **Run:**
+  ```bash
+  cd "$(mktemp -d)" && ls -A; echo "--- empty above ---"
+  storcli64 /call show nolog >/dev/null 2>&1; echo "nolog exit=$?"
+  ls -A; echo "--- after the nolog run ---"
+  storcli64 /call show >/dev/null 2>&1;       echo "bare  exit=$?"
+  ls -A; echo "--- after the bare run ---"
+  # And the other two forms the script uses, keyword accepted or not:
+  storcli64 /call/vall show nolog      >/dev/null 2>&1; echo "vall  nolog exit=$?"
+  storcli64 /call/eall/sall show nolog >/dev/null 2>&1; echo "sall  nolog exit=$?"
+  ```
+  Substitute `perccli64` throughout on a Dell host; it is the same tool rebadged, and an
+  answer from either settles it.
+- **Run as:** **root.** These CLIs need it to reach the controller, and an unprivileged run
+  can fail before it gets far enough to write anything, which would answer the question
+  wrongly rather than not at all.
+- **Send back:** the four exit codes, and the filenames that appeared — filenames only,
+  not contents, and a log from a RAID CLI is one of the few files here whose *name* is the
+  whole answer. Three things settle it: `nolog exit=0` with the directory still empty, a
+  file appearing after the bare run, and the last two exits matching the first. If the
+  directory is empty after **both** runs, say so — that means this fix was a no-op on this
+  version and the entry should say which version.
+
 ### FT-007 — the root half, on hardware that has any (standing)
 
 - **Needs:** any host you can `sudo` on, and ideally one with a BMC, a
