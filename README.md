@@ -81,6 +81,13 @@ see [Exit codes](#exit-codes).
 `timeout` is strongly recommended but no longer required: without it, commands that
 would have been wrapped simply run unwrapped, so a hung tool can stall the run.
 
+Those two sentences used to contradict each other on the hosts where it mattered. A
+review found that with no `timeout` installed, the empty wrapper array aborted the script
+under `set -u` on any bash below 4.4 — so the fallback for minimal hosts was exactly what
+broke them, and the 3.0 floor was a claim the code did not meet. Fixed in v11 (`R2-003`),
+and the test suite now runs the script with no `timeout` on `PATH` at all, which it had
+never once done.
+
 **Optional.** Each unlocks a section; each is detected before use and skipped if absent:
 
 | Tool | Adds |

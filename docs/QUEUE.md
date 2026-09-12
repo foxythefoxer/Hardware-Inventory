@@ -45,12 +45,21 @@ and an empty **Remaining** is exactly when they get forgotten:
   either.
 - Open entries in [`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is
   still waiting on from host classes this machine is not — FT-013 is FR-004's
-  own, and an LXC answering it `0` reopens FR-004 as a defect.
+  own, and an LXC answering it `0` reopens FR-004 as a defect. **R2 added
+  FT-014 and FT-015**, and FT-015 is the one that would change a rating rather
+  than a fix: if a real controller numbers its drives from 10 or higher, R2-009
+  was a HIGH.
 
 **An unadjudicated review round rots the same way this queue does, and has less
 holding it up** — a queue item is at least visible in one line here, while a
 finding nobody ruled on is 150,000 bytes into a document whose own README says
-not to act on it without reading the ledger first.
+not to act on it without reading the ledger first. **R2 is the worked example
+and it is now closed:** it sat at 2 of 27 adjudicated while this file said
+"Remaining: nothing", which was true of the queue and false of the repo. Four of
+the 25 that were still open turned out to be defects a running host would hit —
+one hang, one total loss of a healthy array, one false warning on Alpine, one
+silent omission from the filesystem table. **Rule the findings as you read them.
+A round filed whole is a backlog no file tracks.**
 
 **Read the ledger entry before implementing any accepted FR.** For an
 accepted-with-changes item the conditions **are** the acceptance, and a summary

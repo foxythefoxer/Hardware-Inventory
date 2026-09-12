@@ -40,7 +40,7 @@ only them.
 
 | File | What it is |
 |---|---|
-| `code-review-*--r2--anthropic--claude-opus-5--*` | **Round two**, one reviewer, against v7 at `34ca470`. Summary + detailed, 27 findings: 1 CRITICAL, 3 HIGH, 7 MEDIUM, 11 LOW, 5 NITPICK |
+| `code-review-*--r2--anthropic--claude-opus-5--*` | **Round two**, one reviewer, against v7 at `34ca470`. Summary + detailed, 27 findings: 1 CRITICAL, 3 HIGH, 7 MEDIUM, 11 LOW, 5 NITPICK. **Fully adjudicated 2026-09-12** — 23 accepted as `R2-001` … `R2-023`, 4 declined |
 | `code-review-prompt-r2.md` | The prompt that produced the round-two documents above. Includes the upload manifest for a web session with no repository access |
 | `code-review-prompt-r1.md` | The prompt given to all three round-one models below. Superseded; kept because those documents are what it produced |
 | `code-review-summary--anthropic--claude-opus-5--*` | Summary + detailed, 35 findings |
