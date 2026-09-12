@@ -918,10 +918,11 @@ One reviewer this round: **Anthropic Claude Opus 5**, 2026-09-09, against
 [`reviews/`](reviews/), committed unedited but for the Commit SHA cell each one instructed
 be filled in before filing. 27 findings: 1 CRITICAL, 3 HIGH, 7 MEDIUM, 11 LOW, 5 NITPICK.
 
-**Adjudicated so far: 11 of 27** — the CRITICAL, all three HIGHs and all seven MEDIUMs.
-The 16 remaining are the 11 LOW and 5 NITPICK, and they have had no verdict, which is the
-state [`QUEUE.md`](QUEUE.md) warns rots fastest, since an unruled finding cannot appear in
-that file at all. Keep this line current; it is the only count anyone reads.
+**Adjudicated: 27 of 27. The round is closed.** 23 accepted and implemented, 4 declined
+(`F-020`, `F-021`, `F-023`, `F-027` — all in the LOW/NITPICK batch below, and in
+[`collectors.md`](../.claude/rules/collectors.md) so they are not re-proposed). Nothing
+from R2 is outstanding; what remains unverified is on host classes this machine is not, and
+is in [`FIELD-TESTS.md`](FIELD-TESTS.md) as FT-011, FT-012, FT-014 and FT-015.
 
 ### R2-001 — `perccli`/`storcli` invoked without `nolog` — accepted, done
 
@@ -1335,6 +1336,113 @@ returned nothing for 3 of the containers `pct list` named".
 **The check.** T22's second half stubs a `pct` whose `list` names three containers and whose
 every `config` fails — the worst shape of it. It asserts the warning by name and that it
 carries the count. Mutation: restore the silent `continue` and both fail.
+
+### R2-012 … R2-023 — the LOW and NITPICK batch, twelve accepted and four declined
+
+Provenance: Claude Opus 5's eleven LOW and five NITPICK findings, adjudicated in one pass
+the way A-009 was. Batched because each is a few lines and because ruling on them
+individually would have produced sixteen commits saying the same thing; **not** batched in
+the verdict — four are declined below and each says why.
+
+Every accepted item is in v11. The ones with a behaviour change are mutation-verified; the
+ones that are comments or conventions are not, and are marked.
+
+**Accepted, and the reason each is more than tidying:**
+
+- **R2-012** (`F-005`) — `systemd-detect-virt` and `strings` wrapped in `TMO`. Neither can
+  realistically block; both were already `have`-guarded with stderr redirected, so they met
+  two thirds of the convention. Fixed anyway because **the convention's value is that it
+  holds without exception**, and the two sites that sat outside it are exactly how a third
+  gets added. No behaviour change, no test.
+- **R2-013** (`F-012`) — the DIMM `awk` table and the Displays accumulator both built rows
+  outside `row()`/`esc()`. **C-004's own ledger entry says there was one such table. There
+  were two.** A `|` in an SMBIOS part number is unlikely, but unescaped it shifts every
+  later cell and attributes a part number to the wrong slot — a wrong answer, which is what
+  this report exists to prevent, so the rating is about likelihood and not consequence. The
+  DIMM `awk` takes the same three-line `esc()` as the Unraid table; the Displays row goes
+  through `row()`. T15 grew a connector whose *name* carries a pipe — built in the temp dir
+  rather than committed, because the `strings` branch filters `|` out of the display text
+  already and `edid-decode` is not installed everywhere, so the connector name is the only
+  path to the escape. Cell count asserted as well as the escape, like T4 and T6.
+- **R2-014** (`F-006`) — `smartctl --scan` captured once instead of run twice. Cost a second
+  15s budget and left a window where a device appearing between the two calls gave a header
+  with nothing under it. Output identical; T6 covers it.
+- **R2-015** (`F-010`) — `yk()` strips CR, matching `row()`. **No caller can supply one
+  today** — `/etc/unraid-version` is on the root filesystem, not the FAT32 flash — so this
+  is defensive and has no test. One substitution, and FR-005's whole lesson was that a CR
+  arrives from a direction nobody predicted.
+- **R2-016** (`F-011`) — `key` was an unanchored substring, so `rd.vconsole.keymap=us` was
+  redacted on every dracut host. **The exclusion names the safe keys rather than tightening
+  the keyword**, because narrowing `key` to `/\.key$|keyfile|luks/` risks the
+  under-redaction direction, which is the worse failure. T9 gained both spellings — only one
+  carries the `rd.` prefix, and a fix anchored on that would pass on half the input — plus
+  an assertion that `rd.luks.key` *is still redacted*, which a careless exclusion would have
+  broken. Mutation-verified.
+- **R2-017** (`F-016`) — `tail -15` became `IPMI_SEL_LINES`, per C-014. Still `tail` and not
+  `cap()`: `cap()` keeps the first N lines and the recent end of an event log is the useful
+  end. The heading now prints the constant, so the two cannot drift.
+- **R2-018** (`F-025`) — two lines of comment, no code. `racadm` present and root **is** the
+  warn condition, and `ipmitool mc info` warns on the same shape twenty lines above. The
+  difference is that IPMI has `[ -e /dev/ipmi0 ]` to prove the hardware exists and racadm
+  has nothing equivalent — it ships with Dell OMSA and installs where no iDRAC answers. The
+  decision was right; it was the only never-warns site in the file with no note saying so,
+  and that note is what stops the next maintainer "fixing" it.
+- **R2-019** (`F-026`) — the `df` exclusion filter was anchored at the start and not the
+  end, so it dropped any filesystem whose name merely *begins* with one of five words.
+  Measured here: a `nonessential` ZFS dataset and an `overlayfs-x` mount both vanished, with
+  no warning, because the emptiness test still saw `df`'s header. **A silent omission from a
+  document read as ground truth** is the category the exit-code contract exists to prevent.
+  T23 asserts both directions — a fix that simply deletes the filter passes the first two
+  assertions. Mutation-verified.
+- **R2-020** (`F-019`) — `CNAMES_ALL` cut from the `docker ps -a` capture already taken
+  instead of asking the daemon again. Removes a 10s budget and a window where a container
+  created between the calls appeared in one table and not the other. `cut` on an empty
+  string yields an empty string, so T12's zero-container case is unchanged.
+- **R2-021** (`F-018`) — comment only, and **the reviewer's recommendation declined in
+  favour of their alternative**. Exit 124 from the docker gate means the socket exists and
+  did not answer in 10s, which is arguably present-and-permitted-and-silent. It stays folded
+  into the gate: splitting on an exit code reopens an adjudicated judgment for one narrow
+  case, and a daemon too wedged to answer `info` in 10s fails every collector behind it
+  anyway. The section is empty either way. Now stated at the site instead of implied.
+- **R2-022** (`F-022`) — three `date` calls could straddle midnight and file the report under
+  one day in `collected:` while the fence printed another. Both are machine-read and
+  **disagreeing with each other is worse than being a second stale**. One `date -Iseconds`
+  is captured and the date sliced off it; only the header's clock time is read separately
+  and nothing parses that. Deliberately *not* fixed by reformatting one call into all three:
+  that needs GNU's `%:z` or changes the fence's ISO offset format, and this round raised
+  BusyBox and old-util-linux portability twice. **The check is structural** — a grep that no
+  second date-formatting call exists — because two `date` calls agree every second of the
+  day but one, so a behavioural test here would be decoration. Said plainly in the test.
+- **R2-023** (`F-024`) — `g()` takes the file as `$2` instead of closing over the loop's
+  `$f`. It worked and cost nothing measurable; a helper that silently depends on an
+  enclosing scope breaks when someone moves the call, and this one is called four times on
+  one line. T4's shares table covers it.
+
+**Declined, with the fact that settles each:**
+
+- **`F-027`, take guest status from the list you already have** — declined as a priority,
+  not as an edit. The reviewer rates it LOW and says they would not push it, and the reason
+  is decisive: **`pct list`'s column order is not a documented interface.** The fix trades
+  two undocumented-format parses plus a fallback for wall clock that only matters on a
+  degraded cluster — which is the case R2-010 now bounds directly. More code and more
+  failure modes to partially re-solve a problem already solved a better way.
+- **`F-020`, make the constants `readonly`** — declined. It prevents nothing that has
+  happened or plausibly could: the constants are assigned once at the top of a one-shot
+  script and never reassigned, and T1 would not catch a reassignment either way. YAGNI.
+- **`F-021`, `printf --` instead of `echo` for the nine separator lines** — declined. Under
+  bash's builtin `echo` a leading `---` prints literally, so nothing is broken and nothing
+  would change in the output. Nine lines of churn for zero behaviour, in a file where every
+  diff has to be reviewed against a read-only guarantee.
+- **`F-023`, the filesystems section prints its fence unconditionally** — declined, and this
+  one is **not** a judgment call about taste. It is the only section that does not follow
+  capture-then-print-if-non-empty, and the reviewer is right that it is an inconsistency.
+  But the fix is to capture the section body into a variable, and **that body contains four
+  `warn` calls** — a command substitution is a subshell, so every one of them would be
+  silently lost (G-002). The proposed fix would trade an unreachable empty fence (`df` is
+  coreutils) for a real hole in the warning accumulator. Reopening this needs a
+  restructuring that keeps `warn` in the main shell, not a capture.
+
+209 → 210 passed, 0 failed across the batch.
 
 ---
 

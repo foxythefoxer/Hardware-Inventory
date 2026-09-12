@@ -32,13 +32,15 @@ That is not "nothing left to do", and the difference matters more now than it di
 when this list was full. Three bodies of work sit outside this file by design,
 and an empty **Remaining** is exactly when they get forgotten:
 
-- **Code review round two is adjudicated down to MEDIUM.** `R2-001` through
-  `R2-011` are done — the CRITICAL, all three HIGHs and all seven MEDIUMs. The
-  remaining **16 of 27 findings have never been through `/adjudicate`**: the 11
-  LOW and 5 NITPICK. They cannot appear here, accepted or rejected, until they
-  do. The documents are in [`reviews/`](reviews/); the count line is at the head
-  of the `R2-` section in [`DISPOSITIONS.md`](DISPOSITIONS.md), and the review's
-  own prioritized action list names all 16 with a one-line fix each.
+- ~~**Code review round two is unadjudicated below its CRITICAL.**~~ **Closed
+  2026-09-12.** All 27 findings have a verdict: 23 accepted and implemented as
+  `R2-001` … `R2-023`, 4 declined and written into
+  [`collectors.md`](../.claude/rules/collectors.md) so they are not
+  re-proposed. This bullet stays, struck through, because the *class* is what
+  matters and it will recur: a review round that lands as one large document
+  produces a backlog no file tracks until someone adjudicates it, and this one
+  sat at 2 of 27 for three days. The next round wants its findings ruled on as
+  they are read, not filed whole.
 - [`PRIOR-ART.md`](PRIOR-ART.md) holds leads that have never been adjudicated
   either.
 - Open entries in [`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is
@@ -81,6 +83,20 @@ Verified against the file and covered by `tests/run.sh` where testable.
   its `## <hostname>` heading replaced with the fixed `## Hardware inventory`, so a
   consumer pasting the report into a hand-written document has a heading-level-agnostic
   boundary and no longer a title that collides with the document's own. Issue #5. v10.
+- **R2-012 … R2-023** — the LOW/NITPICK batch, twelve of sixteen accepted, v11.
+  Two tables that built rows outside `row()`/`esc()` routed through them —
+  C-004's entry claimed there was one and there were two. `key` no longer
+  redacts `vconsole.keymap` on every dracut host, with `rd.luks.key` asserted
+  still-redacted so the exclusion cannot widen unnoticed. The `df` filter
+  anchored: unanchored it silently dropped any filesystem whose name begins
+  with `none`, `overlay` or `tmpfs`. `docker ps -a` and `smartctl --scan` each
+  run once instead of twice. One timestamp feeds the fence and `collected:`, so
+  the two machine-read date fields cannot disagree. Plus `yk()` stripping CR,
+  `IPMI_SEL_LINES`, `g()` taking its file as an argument, two more tools inside
+  the timeout convention, and comments recording the racadm and docker-gate
+  judgments. **Four declined** — `F-020`, `F-021`, `F-023`, `F-027` — with
+  `F-023` the one worth knowing: capturing that section to fix its fence would
+  put four `warn` calls in a subshell and lose them.
 - **R2-005 … R2-011** — all seven R2 MEDIUMs, v11. `fld()`'s key anchored, so a
   future `lsblk` column that merely ends with an existing key can no longer make
   the device table name the wrong device (T6's fixture grew `KNAME`, and its

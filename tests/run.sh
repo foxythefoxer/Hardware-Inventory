@@ -399,6 +399,23 @@ grep -q 'iqn.2001-04.com.example:target0' "$TMP/k.md" \
   && ok "iSCSI target name preserved" || bad "target name lost"
 grep -q 'rd.iscsi.password=REDACTED' "$TMP/k.md" \
   && ok "name-based redaction still applies" || bad "rd.iscsi.password not redacted"
+
+# R2-016, the over-redaction direction again. `key` is an unanchored substring,
+# so every dracut host's `rd.vconsole.keymap=us` was redacted as though it were
+# a LUKS keyfile. The value lost is trivial; the pattern is not, and it gets
+# worse as keywords are added. Both spellings, because only one carries the
+# `rd.` prefix and a fix that anchors on that would pass on half the input.
+grep -q 'rd.vconsole.keymap=us' "$TMP/k.md" \
+  && ok "rd.vconsole.keymap not over-redacted" || bad 'keymap redacted — `key` is matching as a substring'
+grep -q 'vconsole.keyboard=pc105' "$TMP/k.md" \
+  && ok "vconsole.keyboard not over-redacted" || bad 'keyboard redacted — `key` is matching as a substring'
+# The exclusion must not have opened a hole: a name that genuinely contains
+# `key` AND is a credential still goes. rd.luks.key is asserted above by its
+# secret value; this asserts the NAME side of the same parameter survives the
+# new `!~` clause, which a careless `keym*` pattern would have broken.
+grep -q 'rd.luks.key=REDACTED' "$TMP/k.md" \
+  && ok "rd.luks.key still redacted despite the keymap exclusion" \
+  || bad "rd.luks.key no longer redacted — the exclusion is too broad"
 grep -q 'rd.iscsi.initiator=iqn.1994-05' "$TMP/k.md" \
   && ok "non-secret iscsi params untouched" || bad "over-redacted rd.iscsi.initiator"
 
@@ -789,6 +806,26 @@ grep -q 'TESTMON-27' "$TMP/d.md" && ok "product name recovered" || bad "product 
 grep -q 'SN0123456789' "$TMP/d.md" && ok "panel serial recovered" || bad "panel serial missing"
 grep -q 'card1-DP-2' "$TMP/d.md" \
   && bad "disconnected connector (0-byte edid) produced a row" || ok "0-byte edid produces no row"
+
+# R2-013. The Displays table built its rows by hand instead of through row(),
+# which is the helper that escapes `|` — C-004's ledger entry claimed there was
+# exactly one table outside it and there were two. The fixture is built here
+# rather than committed: a connector directory whose NAME carries a pipe is the
+# only way to reach the escape, since the `strings` branch filters `|` out of
+# the display text already and the edid-decode branch is not installed
+# everywhere.
+mkdir -p "$TMP/drmpipe/card1-D|P-9"
+cp "$FIX/drm/card1-DP-1/edid" "$TMP/drmpipe/card1-D|P-9/edid"
+sed -e "s#/sys/class/drm#$TMP/drmpipe#g" "$SCRIPT" > "$TMP/drmpipe.sh"
+bash "$TMP/drmpipe.sh" > "$TMP/dp.md" 2>/dev/null
+grepF() { grep -qF "$1" "$2"; }
+grepF '| card1-D\|P-9 |' "$TMP/dp.md" \
+  && ok "pipe in a connector name escaped" || bad "pipe in a connector name not escaped — the row is built outside row()"
+# The escape alone is not enough: the row must still split into its 2 declared
+# cells, which is what an escape is FOR. Same assertion shape as T4 and T6.
+sed -n '/card1-D/s/\\|//gp' "$TMP/dp.md" | awk -F'|' '{print NF-2}' | grep -qx '2' \
+  && ok "escaped display row still splits into its 2 declared cells" \
+  || bad "escaped display row has the wrong cell count"
 # The stat-0 trap, and the only assertion here that a plain file cannot make:
 # EVERY real edid attribute reports `stat -c%s` = 0, including the ones handing
 # back a full 256 bytes, so a `[ -s ]` gate skips every monitor on the host. A
@@ -1223,6 +1260,64 @@ sed -n '/^## Collection warnings/,$p' "$TMP/pctbad.md" | grep -q 'pct config' \
 sed -n '/^## Collection warnings/,$p' "$TMP/pctbad.md" | grep -q 'for 3 of the containers' \
   && ok "warning counts the dropped guests" || bad "warning does not say how many rows are missing"
 rc_agrees "$RC" "$TMP/pctbad.md"
+
+# ---------------------------------------------------- T23 silent omissions ---
+# Two one-line changes whose failure mode is the same and is the worst kind
+# this report has: data quietly missing from a document read as ground truth,
+# with no warning, because the code looked right.
+head_ "T23 Silent omissions (df prefix filter, single timestamp)"
+
+# --- R2-019: the df exclusion filter was an unanchored prefix match ---
+mkdir -p "$TMP/dfbin"
+cat > "$TMP/dfbin/df" <<'EOF'
+#!/bin/sh
+# Two filesystems whose names BEGIN with an excluded word and are not it, and
+# the four that genuinely should be dropped.
+cat <<'D'
+Filesystem     Type      Size  Used Avail Use% Mounted on
+nonessential   zfs       2.0T  1.1T  900G  56% /srv/nonessential
+overlayfs-x    fuse       50G   10G   40G  20% /srv/ovl
+tmpfs          tmpfs      16G     0   16G   0% /dev/shm
+none           overlay     1G    0    1G   0% /run/x
+D
+EOF
+chmod +x "$TMP/dfbin/df"
+
+PATH="$TMP/dfbin:$TMP/minbin" bash "$SCRIPT" > "$TMP/df.md" 2>/dev/null
+grep -q 'nonessential   zfs' "$TMP/df.md" \
+  && ok "filesystem named like an excluded prefix survives the filter" \
+  || bad "a real filesystem was dropped because its name begins with 'none'"
+grep -q 'overlayfs-x' "$TMP/df.md" \
+  && ok "overlayfs-x survives the filter" || bad "overlayfs-x dropped as though it were 'overlay'"
+# The filter must still do its job — both directions, or a fix that deletes it
+# passes the two assertions above.
+grep -qE '^tmpfs +tmpfs' "$TMP/df.md" \
+  && bad "tmpfs is no longer excluded — the filter stopped working" || ok "tmpfs still excluded"
+grep -qE '^none +overlay' "$TMP/df.md" \
+  && bad "none is no longer excluded — the filter stopped working" || ok "none still excluded"
+
+# --- R2-022: three date calls could straddle midnight ---
+# Structural, because the runtime half cannot fail on demand: two `date` calls
+# agree on the date every second of the day except one. So the check is that
+# only ONE call can produce a date at all — the same reasoning as T1's TMO
+# grep, and stated rather than dressed up as a behavioural test.
+if [ "$(grep -c "date '+%Y-%m-%d" "$SCRIPT")" -eq 0 ]; then
+  ok "no second date call can disagree with the captured timestamp"
+else
+  bad "a date-formatting call is back — it can straddle midnight against NOW_ISO:"
+  grep -n "date '+%Y-%m-%d" "$SCRIPT" | sed 's/^/        /'
+fi
+
+# The runtime half, which is not decoration: it catches the slice itself
+# breaking. Asserted by equality rather than against today's date, which would
+# make this a clock check.
+FENCEDATE=$(sed -n 's/.*hw-inventory:begin .*collected=\([0-9-]*\)T.*/\1/p' "$TMP/clean.md")
+COLLDATE=$(sed -n 's/^collected: \([0-9-]*\)$/\1/p' "$TMP/clean.md")
+if [ -n "$FENCEDATE" ] && [ "$FENCEDATE" = "$COLLDATE" ]; then
+  ok "fence and collected: agree on the date ($FENCEDATE)"
+else
+  bad "fence date '$FENCEDATE' and collected: '$COLLDATE' disagree, or one did not parse"
+fi
 
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

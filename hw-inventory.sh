@@ -104,6 +104,10 @@ IPMI_LAN_LINES=8             # `ipmitool lan print` grepped for 4 named
                               # "Default Gateway IP Address"), hence 2x.
 IPMI_SENSOR_LINES=45         # `ipmitool sdr elist` — a big server can have
                               # dozens of sensors; this one IS a real corpus cap.
+IPMI_SEL_LINES=15            # `ipmitool sel list` — the system event log, and a
+                              # genuine open-ended corpus: this is the TAIL of
+                              # it, so the cap is "how much recent history is
+                              # worth carrying", not a sanity bound (R2-017).
 RACADM_LINES=35              # `racadm getsysinfo`.
 
 # Proxmox
@@ -246,6 +250,13 @@ yk() {
   local v=${2:-}
   v=${v//\\/\\\\}
   v=${v//\"/\\\"}
+  # CR too, matching row() three lines above (R2-015). A CR here parses as valid
+  # YAML and carries a stray control character into every downstream consumer —
+  # `os: "Unraid 7.0\r"`. No caller can supply one today, since
+  # /etc/unraid-version is on the root filesystem rather than the FAT32 flash.
+  # It is one substitution, and FR-005's whole lesson was that a CR arrives from
+  # a direction nobody predicted.
+  v=${v//$'\r'/}
   if [ -z "$v" ]; then printf '%s: null\n' "$1"; else printf '%s: "%s"\n' "$1" "$v"; fi
 }
 
@@ -329,7 +340,10 @@ fi
 
 PLATFORM="bare-metal"
 if have systemd-detect-virt; then
-  DV=$(systemd-detect-virt 2>/dev/null || true)
+  # Wrapped like everything else (R2-012). It cannot realistically block — it
+  # reads DMI attributes and /proc/1/environ — but the convention's value is
+  # that it holds without exception, and an exception invites the next one.
+  DV=$(${TMO[@]+"${TMO[@]}"} systemd-detect-virt 2>/dev/null || true)
   [ -n "$DV" ] && [ "$DV" != "none" ] && PLATFORM="$DV"
 fi
 
@@ -388,8 +402,17 @@ if have lsblk; then
 fi
 
 # ============================================================ frontmatter ===
+# One timestamp, three renderings (R2-022). Three separate `date` calls could
+# straddle midnight and file the report under one day in `collected:` while the
+# fence and the header printed another — a one-second-per-day window, but
+# `collected:` and the fence are both machine-read and disagreeing with each
+# other is worse than being a second stale. The date is sliced off the ISO
+# string rather than re-formatted, so no second call can disagree with it; only
+# the header's clock time is read separately, and nothing parses that.
+NOW_ISO=$(date -Iseconds)
+NOW_DATE=${NOW_ISO%%T*}
 printf '<!-- hw-inventory:begin host=%s collected=%s collector=hw-inventory.sh/v11 -->\n\n' \
-  "$HOST" "$(date -Iseconds)"
+  "$HOST" "$NOW_ISO"
 printf -- '---\n'
 yk host "$HOST"
 yk os "$OSNAME"
@@ -401,15 +424,15 @@ yk model "${PROD:-}"
 yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
-printf 'collected: %s\n' "$(date '+%Y-%m-%d')"
+printf 'collected: %s\n' "$NOW_DATE"
 printf 'collector: hw-inventory.sh v11\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 
 # ---------------------------------------------------------------- header ----
 printf '## Hardware inventory\n\n'
-printf '> [!note] Collected %s by `hw-inventory.sh`%s\n\n' \
-  "$(date '+%Y-%m-%d %H:%M %Z')" \
+printf '> [!note] Collected %s %s by `hw-inventory.sh`%s\n\n' \
+  "$NOW_DATE" "$(date '+%H:%M %Z')" \
   "$(is_root || echo ' — **not run as root**, some fields incomplete')"
 
 # ------------------------------------------------------------ identity ------
@@ -529,7 +552,15 @@ if [ -r /proc/cmdline ]; then
     out=""
     for (i=1;i<=NF;i++) {
       tok=$i; name=tok; sub(/=.*/,"",name)
-      if (tok ~ /=/ && tolower(name) ~ /(password|secret|token|key)/) tok=name"=REDACTED"
+      # `key` is an unanchored substring, so rd.vconsole.keymap=us and
+      # vconsole.keymap=us were redacted on every dracut host (R2-016). The
+      # exclusion names the safe keys rather than tightening `key` itself:
+      # narrowing it to /\.key$|keyfile|luks/ risks the UNDER-redaction
+      # direction, which is the worse failure. Over-redaction is still a real
+      # one — T9 asserts both halves — and this list wants extending, not the
+      # keyword narrowing, the next time a safe name collides.
+      if (tok ~ /=/ && tolower(name) ~ /(password|secret|token|key)/ \
+          && tolower(name) !~ /keymap|keyboard/) tok=name"=REDACTED"
       else if (tok ~ /iscsi:[^@]+@/) sub(/iscsi:[^@]+@/, "iscsi:REDACTED@", tok)
       out = (out=="") ? tok : out" "tok
     }
@@ -561,8 +592,17 @@ echo
 
 if is_root && have dmidecode; then
   MODLINES=$(printf '%s\n' "$DMIMEM" | awk '
+    # Same esc() as the Unraid disks.ini table (R2-013). SMBIOS part numbers and
+    # manufacturer strings are vendor free text, so a `|` is unlikely but not
+    # excluded — and an unescaped one shifts every later cell, attributing a
+    # part number to the wrong slot. That is the wrong-answer class this report
+    # exists to prevent, which is why likelihood rather than consequence is what
+    # makes it minor. C-004 claimed one table was built outside row(); there
+    # were two.
+    function esc(s) { gsub(/\|/, "\\|", s); return s }
     function emit() {
-      if (size != "" && size !~ /^No/) printf "| %s | %s | %s | %s | %s |\n", loc, size, sp, mf, pn
+      if (size != "" && size !~ /^No/)
+        printf "| %s | %s | %s | %s | %s |\n", esc(loc), esc(size), esc(sp), esc(mf), esc(pn)
     }
     /^Memory Device$/ {emit(); loc="";size="";sp="";pn="";mf=""}
     /^\tLocator:/ {sub(/^\tLocator:[ \t]*/,""); loc=$0}
@@ -668,9 +708,15 @@ if have smartctl && [ -n "$DISKS" ]; then
       warn "\`smartctl\` answered for none of the $SMTOTAL disk(s) as root — every health row is empty. Drives behind a RAID controller are expected here; a plain SATA/NVMe host is not."
     fi
     echo
-    if tmo 15 smartctl --scan 2>/dev/null | grep -q .; then
+    # Captured once, not run twice (R2-014). Two calls cost a second 15s budget
+    # and left a window where a device appearing or disappearing between them
+    # gave a header with nothing under it, or a scan whose result was already
+    # discarded. Capture-then-test is the pattern the rest of the file uses for
+    # exactly this reason.
+    SCAN=$(tmo 15 smartctl --scan 2>/dev/null | cap "$SMART_SCAN_LINES" "scan lines")
+    if [ -n "$SCAN" ]; then
       printf '**`smartctl --scan` sees:**\n\n```\n'
-      tmo 15 smartctl --scan 2>/dev/null | cap "$SMART_SCAN_LINES" "scan lines"
+      printf '%s\n' "$SCAN"
       printf '```\n\n'
     fi
     printf '_Drives behind a hardware RAID controller do not appear above — see the RAID controller section._\n\n'
@@ -877,9 +923,14 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
     USHARES=$(for f in /boot/config/shares/*.cfg; do
       [ -r "$f" ] || continue
       n=${f##*/}; n=${n%.cfg}
-      g() { awk -F= -v k="$1" '$1==k{gsub(/"/,"",$2); print $2; exit}' "$f" 2>/dev/null; }
-      row "$n" "$(g shareUseCache)" "$(g shareCachePool)" \
-        "$(g shareAllocator)" "$(g shareInclude)"
+      # Takes the file as $2 rather than closing over the loop's $f (R2-023).
+      # It worked, and redefining a function per iteration costs nothing
+      # measurable — but a helper that silently depends on a variable from an
+      # enclosing scope breaks when someone moves the call, and this one is
+      # called four times on one line.
+      g() { awk -F= -v k="$1" '$1==k{gsub(/"/,"",$2); print $2; exit}' "$2" 2>/dev/null; }
+      row "$n" "$(g shareUseCache "$f")" "$(g shareCachePool "$f")" \
+        "$(g shareAllocator "$f")" "$(g shareInclude "$f")"
     done)
     if [ -n "$USHARES" ]; then
       printf '#### Shares\n\n| Share | Use cache | Cache pool | Allocator | Included disks |\n|---|---|---|---|---|\n%s\n\n' "$USHARES"
@@ -900,7 +951,13 @@ printf '### Storage — filesystems and pools\n\n'
 printf '```\n'
 if have df; then
   echo "--- df -hT ---"
-  DFOUT=$(${TMO[@]+"${TMO[@]}"} df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | cap "$FS_TABLE_LINES" "filesystem table lines")
+  # The trailing [[:space:]] is load-bearing (R2-019). Anchored only at the
+  # start, the alternation dropped any filesystem whose name merely BEGINS with
+  # one of the five words — measured: a `nonessential` ZFS dataset and an
+  # `overlayfs-x` mount both vanished. df always emits whitespace after that
+  # column, and a silent omission from a report read as ground truth is the
+  # category the exit-code contract exists to prevent.
+  DFOUT=$(${TMO[@]+"${TMO[@]}"} df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)[[:space:]]' | cap "$FS_TABLE_LINES" "filesystem table lines")
   printf '%s\n' "$DFOUT"
   # This emptiness test is safe for a reason worth writing down, because the
   # findmnt one below was not (R2-008): df always prints a header row, and the
@@ -1065,14 +1122,18 @@ for e in /sys/class/drm/card*-*/edid; do
     # the serial cannot be told apart — both are still recovered, which is
     # enough for inventory. The filter drops timing-block bytes that happen to
     # be printable ("UP0 5" and friends).
-    disp=$(strings -n 4 2>/dev/null < "$e" \
+    disp=$(${TMO[@]+"${TMO[@]}"} strings -n 4 2>/dev/null < "$e" \
       | grep -E '^[[:alnum:]][[:alnum:] ._+/-]{5,}$' | paste -sd' ' -)
   fi
   # Worded for both empty cases: no parser installed, and a parser that ran and
   # gave nothing back. The row is still emitted either way — a connector
   # handing over 128 bytes of EDID is an attached display whether or not
   # anything on this host could read it.
-  MONROWS="${MONROWS}| ${conn} | ${disp:-(EDID present, not parsed)} |
+  # Through row() like every other table (R2-013). Built by hand this was the
+  # second of two tables outside the escape helper, and C-004's ledger entry
+  # claimed there was only one. The `strings` branch filters `|` out already;
+  # the edid-decode branch above does not.
+  MONROWS="${MONROWS}$(row "$conn" "${disp:-(EDID present, not parsed)}")
 "
 done
 if [ -n "$MONROWS" ]; then
@@ -1193,13 +1254,27 @@ if have ipmitool && is_root && { [ -e /dev/ipmi0 ] || [ -e /dev/ipmi/0 ] || [ -e
   SENS=$(tmo 30 ipmitool sdr elist 2>/dev/null | grep -viE '\| ns \|' | cap "$IPMI_SENSOR_LINES" "sensor lines")
   [ -n "$SENS" ] && printf '**Sensors**\n\n```\n%s\n```\n\n' "$SENS"
 
-  SEL=$(tmo 25 ipmitool sel list 2>/dev/null | tail -15)
-  [ -n "$SEL" ] && printf '**System event log (last 15 entries)**\n\n```\n%s\n```\n\n' "$SEL"
+  # Named constant, not a bare 15 (R2-017, and C-014's rule). Still `tail` and
+  # not cap(): cap() keeps the FIRST N lines and marks the truncation, and the
+  # recent end of an event log is the useful end. The heading carries the number
+  # so a reader knows the listing is bounded.
+  SEL=$(tmo 25 ipmitool sel list 2>/dev/null | tail -"$IPMI_SEL_LINES")
+  [ -n "$SEL" ] && printf '**System event log (last %d entries)**\n\n```\n%s\n```\n\n' "$IPMI_SEL_LINES" "$SEL"
 elif have ipmitool && is_root; then
   printf '### BMC / IPMI\n\n'
   printf '_`ipmitool` present but no IPMI device node. The `ipmi_si` and `ipmi_devintf` modules are not loaded; this script will not load them. Load them yourself if you want BMC data here._\n\n'
 fi
 
+# No warning here on purpose, and this is the reason rather than an oversight
+# (R2-018). `racadm` present and root IS present-and-permitted, which is the
+# warn condition — and `ipmitool mc info` twenty lines above does warn on the
+# same shape. The difference is the gate: IPMI has `[ -e /dev/ipmi0 ]` to prove
+# the hardware is there, and racadm has no equivalent. It ships with Dell OMSA
+# and installs happily on a machine with no iDRAC answering, so an absent
+# controller and a silent one are indistinguishable from here. Silence is the
+# deliberate choice; every other never-warns site in this file carries a note
+# like this one, and that consistency is what stops the next maintainer
+# "fixing" it.
 if have racadm && is_root; then
   RAC=$(tmo 20 racadm getsysinfo 2>/dev/null \
     | grep -viE 'password|community' | cap "$RACADM_LINES" "racadm lines")
@@ -1316,6 +1391,15 @@ fi
 # stopped daemon, or a user outside the docker group, is a legitimate state and
 # the section is skipped. Past the gate the daemon answered, so a collector
 # that then returns nothing has failed.
+#
+# The timeout case is folded into the gate deliberately (R2-021). `timeout`
+# returns 124 when the socket exists and did not answer in 10s, which is closer
+# to present-and-permitted-and-silent than to absent, so it is arguably a warn.
+# It stays silent: splitting the gate on an exit code reopens an adjudicated
+# judgment for one narrow case, and a daemon too wedged to answer `info` in 10s
+# would fail every collector behind it anyway — the section is empty either
+# way, and the reader learns more from its absence than from a warning about
+# one call. Stated here so the choice is explicit rather than accidental.
 if have docker && ${TMO[@]+"${TMO[@]}"} docker info >/dev/null 2>&1; then
   printf '### Docker\n\n```\n'
   DVER=$(${TMO[@]+"${TMO[@]}"} docker version --format 'Docker {{.Server.Version}}' 2>/dev/null)
@@ -1355,7 +1439,13 @@ if have docker && ${TMO[@]+"${TMO[@]}"} docker info >/dev/null 2>&1; then
   # file, so there is no early-close reason to cap the read itself — and the
   # truncation marker for this one site is deferred to after the container
   # networks table, where it can no longer land inside anyone's argument list.
-  CNAMES_ALL=$(${TMO[@]+"${TMO[@]}"} docker ps -a --format '{{.Names}}' 2>/dev/null)
+  #
+  # Cut from the capture above rather than asking the daemon again (R2-020):
+  # the names are field one of DPSRAW, and a second `docker ps -a` cost another
+  # 10s budget plus a window where a container created between the two calls
+  # appeared in one table and not the other. `cut` on an empty string yields an
+  # empty string, so the zero-container case T12 guards is unchanged.
+  CNAMES_ALL=$(printf '%s\n' "$DPSRAW" | cut -f1)
   CNAMES=$(printf '%s\n' "$CNAMES_ALL" | head -n "$DOCKER_LIST_LIMIT")
   # Below the limit the two are byte-identical — command substitution strips
   # trailing newlines from both sides — and above it one is a strict prefix of

@@ -65,7 +65,16 @@ Judgments already made, so they don't get relitigated:
 - **Test the thing that actually indicates failure, not just emptiness.**
   `dmidecode -t memory` prints a banner to stdout even when it cannot read
   `/dev/mem`, so that check keys off the `Memory Device` record count. An
-  emptiness test there never fires.
+  emptiness test there never fires. The inverse trap is R2-008: `findmnt --real`
+  is a flag that does not exist below util-linux 2.28, so emptiness there meant
+  "wrong version" and the warning asserted "no mounts". Ask what else could
+  produce an empty answer before warning on one.
+- **A tool rejecting our flags is our defect, not its failure.** BusyBox `free`
+  has no `-h`, so an Alpine host warned that `free` reported no memory while
+  `/proc/meminfo` sat readable (R2-006). By the letter of the rule above the
+  warning is correct — present, permitted, returned nothing — but the tool did
+  not fail, we asked it a question it does not answer. Fall back, then warn only
+  if every source is silent, as CPU model and RAM total both now do.
 
 `warn` **must only be called from the main shell.** Pipeline bodies and command
 substitutions are subshells and their mutations are lost (G-002) — no longer a
@@ -166,6 +175,20 @@ under the same ID.
 - **Splitting the file into `section_*()` functions** (C-031) — deferred, not
   rejected. Real improvement, but it restructures a working one-shot reporter;
   not worth the churn until `--skip` / section selection is actually wanted.
+- **Capturing the filesystems section so its fence prints only when non-empty**
+  (`F-023`). The section body contains four `warn` calls, and a command
+  substitution is a subshell, so capturing it loses every one of them (G-002).
+  Trades an unreachable empty fence — `df` is coreutils — for a real hole in the
+  warning accumulator. Reopening needs a restructure that keeps `warn` in the
+  main shell, not a capture.
+- **Taking guest status from `pct list` / `qm list` instead of `pct status`**
+  (`F-027`) — rejected as a priority, not as an edit. Their column order is not
+  a documented interface, and the wall clock it saves only matters on a degraded
+  cluster, which `RUN_BUDGET_S` now bounds directly (R2-010).
+- **`readonly` on the constants** (`F-020`) · **`printf --` for the nine `echo`
+  separator lines** (`F-021`). Neither changes output or prevents anything that
+  has happened. Declined as churn in a file whose every diff is reviewed against
+  a read-only guarantee.
 
 ---
 
