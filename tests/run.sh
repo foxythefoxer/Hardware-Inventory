@@ -110,6 +110,32 @@ else
   ok "every RAID CLI call suppresses its log file"
 fi
 
+# R2-003. Below bash 4.4, `"${arr[@]}"` on an EMPTY array is an unbound
+# variable under `set -u` and the shell exits. TMO is empty on exactly the
+# hosts its `have timeout` fallback exists for, and two of its expansions are
+# in the main shell, where the abort truncates the report mid-file — no
+# warnings block, no footer, and an exit code a caller cannot tell from an
+# honest incomplete collection.
+#
+# Held by grep, not by execution, and that is a real limitation stated rather
+# than hidden: no bash in reach is older than 4.4, so a run cannot fail on it
+# here. T20 covers the other half — that the empty-TMO path still WORKS — on
+# any bash.
+#
+# Comments are stripped, like the banned-verb and pipefail checks above and for
+# the same reason: the TMO comment block deliberately NAMES the bare form to
+# say why it is not used, and this check failed on that comment before it
+# failed on any code. Quoted strings are NOT stripped — strip() would blank the
+# expansion itself. Then every safe expansion is deleted, so whatever
+# `${TMO[@]}` survives both passes is a genuine bare one.
+tmobare() { sed -e 's/#.*//' -e 's/\${TMO\[@\]+"\${TMO\[@\]}"}//g' "$SCRIPT" | grep -n '\${TMO\[@\]}'; }
+if tmobare | grep -q .; then
+  bad "bare \"\${TMO[@]}\" — aborts under set -u on bash < 4.4 with no timeout installed:"
+  tmobare | sed 's/^/        /'
+else
+  ok "every TMO expansion survives an empty array under set -u"
+fi
+
 # Same strip() as the banned-verbs check above: a comment that names
 # `set -o pipefail` to explain why it's avoided (see cap() in the script)
 # is documentation, not the directive itself.
@@ -1024,6 +1050,61 @@ PATH="$TMP/minbin" bash "$TMP/dmi.sh" > "$TMP/dmiblind.md" 2>/dev/null
 grep -q 'FIXTURE-MODEL-9000' "$TMP/dmiblind.md" \
   && bad "filled DMI with no way to tell a container from bare metal" \
   || ok "no systemd-detect-virt, no fallback"
+
+# -------------------------------------------------------------- T20 no tmo ---
+# R2-003, the half a grep cannot make. TMO is empty only where `timeout` is not
+# installed, and until this test every PATH in this suite either prepended to
+# the real one or was minbin — which symlinks `timeout` explicitly. So the
+# array the whole finding is about had never once been empty in a test run, in
+# either direction: the bug was invisible AND so would a broken fix have been.
+#
+# This does not reproduce the abort — that needs bash below 4.4 and nothing
+# here is — it asserts the thing that holds on every bash: with no `timeout`
+# on PATH, every command still runs UNWRAPPED and the report is complete. That
+# is the fallback C-003 built the gate for, and it is what a careless fix
+# (quoting the expansion wrong, or dropping it) would break.
+head_ "T20 Empty TMO — no timeout installed"
+
+mkdir -p "$TMP/notmo"
+for u in bash sh uname hostname date id awk gawk sed grep cat head tail wc ls \
+         paste basename sort tr cut strings readlink; do
+  p=$(command -v "$u" 2>/dev/null) && ln -sf "$p" "$TMP/notmo/$u"
+done
+have_not_timeout=$(PATH="$TMP/notmo" command -v timeout 2>/dev/null || true)
+[ -z "$have_not_timeout" ] && ok "fixture PATH really has no timeout" \
+  || bad "fixture PATH still resolves timeout — this test proves nothing"
+
+# Stubs for the two expansions that sit in the MAIN shell rather than inside a
+# command substitution. Those are the sites where the pre-4.4 abort killed the
+# run outright, so they are the ones worth reaching: `docker info` gates the
+# whole Docker section, and systemd-detect-virt gates FR-004's DMI fallback.
+# Both must be PRESENT for the expansion to be evaluated at all — `have` short
+# -circuits first, which is why minbin alone never exercised them.
+printf '#!/bin/sh\n[ "$1" = version ] && echo "Docker NOTMO-28.0"\nexit 0\n' > "$TMP/notmo/docker"
+printf '#!/bin/sh\nexit 1\n' > "$TMP/notmo/systemd-detect-virt"
+chmod +x "$TMP/notmo/docker" "$TMP/notmo/systemd-detect-virt"
+
+PATH="$TMP/notmo" bash "$SCRIPT" > "$TMP/notmo.md" 2>"$TMP/notmo.err"; RC=$?
+
+# The main-shell abort's exact signature: the file stops mid-report. Assert the
+# footer, not the exit code — with docker stubbed the warnings are a fact about
+# the stub, and rc_agrees is the rule for everything else (CI-004).
+grep -q 'End of report' "$TMP/notmo.md" \
+  && ok "report complete with an empty TMO" \
+  || bad "report truncated — a TMO expansion aborted the main shell"
+rc_agrees "$RC" "$TMP/notmo.md"
+[ ! -s "$TMP/notmo.err" ] && ok "stderr empty with an empty TMO" \
+  || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/notmo.err"; }
+# The point of the fallback, not just its survival: the commands ran AND their
+# output arrived. A fix that expanded to nothing and also ate the command would
+# pass every assertion above, since an empty section is not a warning. The
+# string is one the stub invented, so this asserts nothing about the runner.
+grep -q '^### Docker' "$TMP/notmo.md" \
+  && ok "unwrapped docker gate still ran and passed" \
+  || bad "docker section absent — the gate command did not run unwrapped"
+grep -q 'Docker NOTMO-28.0' "$TMP/notmo.md" \
+  && ok "unwrapped command's output reached the report" \
+  || bad "command ran but its output was lost with an empty TMO"
 
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

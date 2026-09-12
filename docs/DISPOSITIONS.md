@@ -918,6 +918,11 @@ One reviewer this round: **Anthropic Claude Opus 5**, 2026-09-09, against
 [`reviews/`](reviews/), committed unedited but for the Commit SHA cell each one instructed
 be filled in before filing. 27 findings: 1 CRITICAL, 3 HIGH, 7 MEDIUM, 11 LOW, 5 NITPICK.
 
+**Adjudicated so far: 4 of 27** — the CRITICAL and all three HIGHs. The 23 below MEDIUM
+and above have had no verdict, which is the state [`QUEUE.md`](QUEUE.md) warns rots
+fastest, since an unruled finding cannot appear in that file at all. Keep this line
+current; it is the only count anyone reads.
+
 ### R2-001 — `perccli`/`storcli` invoked without `nolog` — accepted, done
 
 Provenance: Claude Opus 5's `F-001`, CRITICAL, and the round's only ship-blocker.
@@ -1014,6 +1019,97 @@ rule already applies to a dependency's flags. 157 passed, 0 failed.
 
 **Not verified here:** this host runs `upowerd`, so the activation itself is inferred from
 the unit file rather than measured. **FT-012** asks for the two-command answer.
+
+### R2-003 — bare `"${TMO[@]}"` aborts under `set -u` below bash 4.4 — accepted, done
+
+Provenance: Claude Opus 5's `F-007`, HIGH.
+
+**The construct.** Below bash 4.4, `"${arr[@]}"` on an **empty** array is an unbound
+variable under `set -u` and the shell exits. `TMO` is empty on exactly one class of host:
+the ones with no `timeout` installed — which is the class its `have timeout` fallback was
+written for (C-003). So the guard that exists to keep minimal hosts working was the thing
+that killed them.
+
+**Twenty-four expansions, and the main-shell count grew after the review was filed.** The
+reviewer found one site in the main shell (the `docker info` gate) where the abort kills
+the run outright rather than emptying one capture in a subshell. There are now **two**:
+FR-004 added a `systemd-detect-virt -q -c` call in an `if` condition four months later,
+which is the same shape. Nobody was careless — the site is correct against every bash in
+this estate. **A construct that is wrong only on hosts you do not own gets re-added by
+ordinary good work**, which is the argument for the grep rather than for a fix alone.
+
+**The fix.** `${TMO[@]+"${TMO[@]}"}` at all 24 sites — one `sed`. It expands to nothing
+when the array is empty and is byte-identical on 4.4 and later. **This does not reopen
+A-004:** the array stays, `tmo()` stays, both keep their roles. The alternative the
+reviewer named — dropping the README's bash floor to 4.4 — trades a one-token fix for a
+narrower support claim, and the floor is load-bearing for the Alpine and enterprise-distro
+cases this round raised elsewhere.
+
+**Not reproducible here, stated rather than hidden.** This host is bash 5.3.15, where both
+forms are correct; `bash -c 'set -u; A=(); "${A[@]}" true'` prints `survived`. The defect
+is read from the bash 4.4 changelog, not measured. That is why it is held two ways.
+
+**The check, and the coverage hole it exposed.** T1 greps for the bare form, stripping
+comments first — the TMO comment block deliberately names the bare form to say why it is
+not used, and **the check failed on that comment before it failed on any code**, which is
+the same lesson `strip()` already encodes for the banned-verb grep. Verified by mutation:
+`sed` the safe form back to bare and T1 names all 24 sites.
+
+The grep cannot show the empty-TMO path still *works*, so T20 runs the script on a `PATH`
+with no `timeout` at all. That case had **never once run in this suite**: every other test
+either prepends to the real `PATH` or uses T8's `minbin`, which symlinks `timeout`
+explicitly. The array the whole finding is about had been empty in zero test runs, so a
+broken fix would have been as invisible as the bug. T20 stubs `docker` and
+`systemd-detect-virt` because `have` short-circuits before the expansion is ever
+evaluated — without them the two main-shell sites are unreachable — and asserts a string
+the stub invented (`Docker NOTMO-28.0`) reaches the report, so a fix that expanded to
+nothing *and ate the command* fails rather than passes.
+
+183 passed, 0 failed.
+
+### R2-004 — `pveversion` unwrapped against a FUSE mount — accepted, done
+
+Provenance: Claude Opus 5's `F-003`, HIGH.
+
+**The file contained its own counter-example, for the second time this round.** Bare
+`pveversion` ran unwrapped on the Identity line while the same binary ran under `tmo 15`
+some 700 lines below. R2-001 was that same shape — `-NoLog` present in one RAID branch and
+missing in the one above it. Two of this round's three HIGH findings are a correct
+treatment that failed to reach a sibling call site, which is worth more than either fix:
+**grep the other callers before closing a finding**, because the reviewer's line number is
+where the symptom was, not where the class ends.
+
+**Why this site is the worst one in the file to leave unwrapped.** `pveversion` reads
+`/etc/pve`, which is pmxcfs — a FUSE filesystem backed by corosync. On a node that has lost
+quorum, reads under it **block rather than fail**, and no `2>/dev/null` helps with a call
+that never returns. The Identity table is the earliest collector in the script, so this
+stalls the run *before any section prints*. The exit-code contract promises the report is
+written in full either way; a hang is the one failure mode that breaks that promise, and it
+breaks it here into a consumer getting nothing at all rather than a degraded report.
+
+The comment at the constants block names this exact line as a deliberate bare `head -1`
+site, so the line was looked at while thinking about `cap()` and not while thinking about
+`$TMO`. Both notes now sit together at the call.
+
+**The fix.** `tmo 10 pveversion`. `tmo` rather than `"${TMO[@]}"` is arbitrary here — both
+are 10s — and it reads better next to the `tmo 15` site it should have matched.
+
+**The check is a fixture edit, not a new test.** `badbin/pveversion` exited 1 for every
+call, which is why T3 — the test that exists *for this defect class* — never saw it. An
+error is not the failure mode of a FUSE mount that has lost quorum; a **hang** is. The stub
+now sleeps 300 on the bare call and keeps the error for `-v`, which is already wrapped:
+two failure modes on one binary, the shape of the real thing.
+
+**Verified by mutation, and it is the clearest result in this batch.** Unwrapped, under
+`badbin` with an outer `timeout 40`: **RC=124, elapsed 40s, no footer** — hung at the first
+collector, exactly as argued. Wrapped: **RC=1, elapsed 30s, footer present**, a complete
+report naming its failed collectors. T3's existing assertions catch both halves without a
+line of new test code.
+
+**Not verified here:** no Proxmox node in reach, and the wedged-quorum state cannot be
+staged on one anyway. What is measured is that a blocking `pveversion` stops the run and
+that the wrapper bounds it — the FUSE behaviour itself is read from pmxcfs's design, not
+observed.
 
 ---
 

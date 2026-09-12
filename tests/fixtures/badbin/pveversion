@@ -1,3 +1,13 @@
 #!/bin/bash
-echo "ERROR: pveversion exploded" >&2
-exit 1
+# Two failure modes on one binary, which is the shape of the real thing.
+#
+# Bare `pveversion` — the Identity line — reads /etc/pve, which is pmxcfs: a
+# FUSE mount backed by corosync that BLOCKS rather than fails when the node
+# loses quorum. So the hostile stub for that call is a HANG, not an error
+# (R2-004). It was unwrapped there while the same binary was wrapped 700 lines
+# below, and this stub exiting 1 for both calls is why T3 never saw it.
+#
+# `-v` keeps the error: that site is already wrapped, and the warning it
+# produces is what T3's warnings-block assertion counts.
+[ "$1" = "-v" ] && { echo "ERROR: pveversion exploded" >&2; exit 1; }
+sleep 300

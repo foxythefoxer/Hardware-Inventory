@@ -145,6 +145,17 @@ NA="—"
 # 10s wrapper; tmo() below applies the same "have timeout" gate for call
 # sites that need a different duration, instead of hardcoding `timeout N`
 # and bypassing the fallback for systems without coreutils timeout.
+#
+# Every expansion is `${TMO[@]+"${TMO[@]}"}`, never a bare `"${TMO[@]}"`
+# (R2-003). Below bash 4.4, `"${arr[@]}"` on an EMPTY array is an unbound
+# variable under `set -u` and the shell exits — and TMO is empty on exactly
+# the hosts the fallback above exists for, the ones with no `timeout`. The
+# `+` form expands to nothing there and is byte-identical on 4.4 and later.
+# Two of the 24 sites are in the main shell (the docker gate and the FR-004
+# container gate), where that abort kills the run mid-report instead of
+# emptying one capture. Same hazard the WARNINGS comment below records for a
+# scalar; T1 holds the invariant because a review found this by reading and
+# no host here is old enough to fail on it.
 TMO=()
 have timeout && TMO=(timeout 10)
 
@@ -205,7 +216,7 @@ yk() {
 # dmidecode wrapper: quiet, returns empty on failure or non-root
 dmi() {
   have dmidecode || { echo ""; return; }
-  "${TMO[@]}" dmidecode -s "$1" 2>/dev/null | grep -v '^#' | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+  ${TMO[@]+"${TMO[@]}"} dmidecode -s "$1" 2>/dev/null | grep -v '^#' | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
 is_root() { [ "$EUID" -eq 0 ]; }
@@ -257,13 +268,13 @@ ARCH=$(uname -m)
 # sections because the frontmatter needs a field from each before anything
 # prints.
 LSCPU=""
-have lscpu && LSCPU=$("${TMO[@]}" lscpu 2>/dev/null)
+have lscpu && LSCPU=$(${TMO[@]+"${TMO[@]}"} lscpu 2>/dev/null)
 CPUMODEL=$(printf '%s\n' "$LSCPU" | awk -F: '/^Model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
 [ -z "$CPUMODEL" ] && CPUMODEL=$(awk -F: '/model name/{gsub(/^[ \t]+/,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null)
 [ -z "$CPUMODEL" ] && warn 'CPU model unknown: neither `lscpu` nor /proc/cpuinfo yielded a model name.'
 
 FREE=""
-have free && FREE=$("${TMO[@]}" free -h 2>/dev/null)
+have free && FREE=$(${TMO[@]+"${TMO[@]}"} free -h 2>/dev/null)
 RAMTOTAL=$(printf '%s\n' "$FREE" | awk '/^Mem:/{print $2}')
 if have free && [ -z "$RAMTOTAL" ]; then
   warn '`free` is installed but reported no total memory — RAM fields are empty.'
@@ -297,7 +308,7 @@ BIOS=$(dmi bios-version)
 # non-systemd host is the cheaper error than a wrong one on every container.
 DMI_SYSFS=""
 if [ -z "$PROD$MFR$BOARD$BIOS" ] && have systemd-detect-virt \
-   && ! "${TMO[@]}" systemd-detect-virt -q -c 2>/dev/null; then
+   && ! ${TMO[@]+"${TMO[@]}"} systemd-detect-virt -q -c 2>/dev/null; then
   PROD=$(dmi_sysfs product_name)
   MFR=$(dmi_sysfs sys_vendor)
   BOARD=$(dmi_sysfs board_name)
@@ -318,7 +329,7 @@ DISKS=""
 LSBLK_RAW=""
 LSBLK_DISKS=""
 if have lsblk; then
-  LSBLK_RAW=$("${TMO[@]}" lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null || true)
+  LSBLK_RAW=$(${TMO[@]+"${TMO[@]}"} lsblk -dn -P -o NAME,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL 2>/dev/null || true)
   LSBLK_DISKS=$(printf '%s\n' "$LSBLK_RAW" \
     | grep -Ev 'NAME="(loop|ram|zram|sr)[0-9]*"|NAME="zd[0-9][0-9]*"' \
     | grep -F 'TYPE="disk"' || true)
@@ -363,7 +374,14 @@ kv "Arch" "$ARCH"
 kv "Platform" "$PLATFORM"
 
 if have pveversion; then
-  kv "Proxmox VE" "$(pveversion 2>/dev/null | head -1)"
+  # Wrapped like every other Proxmox call (R2-004). pveversion reads /etc/pve,
+  # which is pmxcfs — a FUSE mount backed by corosync that BLOCKS rather than
+  # fails when the node loses quorum. This is the earliest collector in the
+  # file, so unwrapped it stalls the run before any section prints and the
+  # consumer gets no report at all, not a degraded one. The bare `head -1`
+  # here is deliberate and unrelated (it takes one known-shape line, so no
+  # cap() constant); the timeout is the part that was missing.
+  kv "Proxmox VE" "$(tmo 10 pveversion 2>/dev/null | head -1)"
 fi
 
 # Three states, not two (FR-004): full identity from dmidecode, partial identity
@@ -481,7 +499,7 @@ DMIMEM=""
 if is_root && have dmidecode; then
   # Captured once: the emptiness check below needs it, and the three parses
   # that follow previously re-ran dmidecode for each.
-  DMIMEM=$("${TMO[@]}" dmidecode -t memory 2>/dev/null)
+  DMIMEM=$(${TMO[@]+"${TMO[@]}"} dmidecode -t memory 2>/dev/null)
   SLOTS=$(printf '%s\n' "$DMIMEM" | grep -c '^Memory Device$')
   FILLED=$(printf '%s\n' "$DMIMEM" | awk '/^\tSize:/ && $2 != "No" {c++} END{print c+0}')
   # Keyed on the record count, not on DMIMEM being empty: a dmidecode that
@@ -489,7 +507,7 @@ if is_root && have dmidecode; then
   # here would never fire on the failure it is meant to catch.
   [ "$SLOTS" -eq 0 ] && warn '`dmidecode -t memory` reported no memory devices as root — DIMM slot counts and the module table are missing.'
   kv "DIMM slots (filled / total)" "$FILLED / $SLOTS"
-  MAXCAP=$("${TMO[@]}" dmidecode -t 16 2>/dev/null | awk -F: '/Maximum Capacity/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+  MAXCAP=$(${TMO[@]+"${TMO[@]}"} dmidecode -t 16 2>/dev/null | awk -F: '/Maximum Capacity/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
   kv "Max supported" "${MAXCAP:-$NA}"
 fi
 echo
@@ -605,7 +623,7 @@ fi
 RAIDCTL=""
 LSPCI_RAW=""
 if have lspci; then
-  LSPCI_RAW=$("${TMO[@]}" lspci 2>/dev/null || true)
+  LSPCI_RAW=$(${TMO[@]+"${TMO[@]}"} lspci 2>/dev/null || true)
   # No RAID controller in the list is normal. An empty list is not: it means
   # the PCI bus was never enumerated, so "no controller found" below would be
   # an assertion this host has none, which is exactly the wrong answer.
@@ -798,14 +816,14 @@ printf '### Storage — filesystems and pools\n\n'
 printf '```\n'
 if have df; then
   echo "--- df -hT ---"
-  DFOUT=$("${TMO[@]}" df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | cap "$FS_TABLE_LINES" "filesystem table lines")
+  DFOUT=$(${TMO[@]+"${TMO[@]}"} df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | cap "$FS_TABLE_LINES" "filesystem table lines")
   printf '%s\n' "$DFOUT"
   [ -z "$DFOUT" ] && warn '`df` is installed but reported no real filesystems.'
 fi
 if have findmnt; then
   echo
   echo "--- findmnt (mount options) ---"
-  FMOUT=$("${TMO[@]}" findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | cap "$FS_TABLE_LINES" "filesystem table lines")
+  FMOUT=$(${TMO[@]+"${TMO[@]}"} findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | cap "$FS_TABLE_LINES" "filesystem table lines")
   printf '%s\n' "$FMOUT"
   [ -z "$FMOUT" ] && warn '`findmnt` is installed but listed no mounted filesystems.'
 fi
@@ -825,12 +843,12 @@ fi
 if have btrfs; then
   echo
   echo "--- btrfs filesystem show ---"
-  "${TMO[@]}" btrfs filesystem show 2>/dev/null | cap "$FS_BTRFS_LINES" "btrfs filesystem lines"
+  ${TMO[@]+"${TMO[@]}"} btrfs filesystem show 2>/dev/null | cap "$FS_BTRFS_LINES" "btrfs filesystem lines"
 fi
 if have pvesm; then
   echo
   echo "--- pvesm status ---"
-  PVSOUT=$("${TMO[@]}" pvesm status 2>/dev/null)
+  PVSOUT=$(${TMO[@]+"${TMO[@]}"} pvesm status 2>/dev/null)
   printf '%s\n' "$PVSOUT"
   if is_root && [ -z "$PVSOUT" ]; then
     warn '`pvesm` is installed but reported no storage as root — the Proxmox storage list is missing.'
@@ -845,7 +863,7 @@ if ! have ip; then
 else
   # Captured for the same reason as the storage table: the row loop is a
   # pipeline body and cannot warn() from inside it.
-  IFROWS=$("${TMO[@]}" ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | while read -r ifc; do
+  IFROWS=$(${TMO[@]+"${TMO[@]}"} ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' | while read -r ifc; do
     [ "$ifc" = "lo" ] && continue
     # `cat`, not `$(<file)`, deliberately — the three sysfs reads above the
     # kernel-parameters table were converted (A-009) and these three were not.
@@ -856,7 +874,7 @@ else
     # empty-stderr assertion on someone else's host, to save three forks.
     state=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "$NA")
     mac=$(cat "/sys/class/net/$ifc/address" 2>/dev/null || echo "$NA")
-    addrs=$("${TMO[@]}" ip -o -4 addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | paste -sd', ' -)
+    addrs=$(${TMO[@]+"${TMO[@]}"} ip -o -4 addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | paste -sd', ' -)
     [ -z "$addrs" ] && addrs="$NA"
     spd=$(cat "/sys/class/net/$ifc/speed" 2>/dev/null)
     if [ -n "$spd" ] && [ "$spd" -gt 0 ] 2>/dev/null; then spd="${spd} Mb/s"; else spd="$NA"; fi
@@ -870,7 +888,7 @@ else
     warn '`ip` is installed but listed no non-loopback interfaces — the network table is empty.'
   fi
   echo
-  DEFRT=$("${TMO[@]}" ip route show default 2>/dev/null | head -1)
+  DEFRT=$(${TMO[@]+"${TMO[@]}"} ip route show default 2>/dev/null | head -1)
   [ -n "$DEFRT" ] && printf 'Default route: `%s`\n\n' "$DEFRT"
   if [ -r /etc/resolv.conf ]; then
     printf 'Resolvers: `%s`\n\n' "$(awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null | paste -sd', ' -)"
@@ -888,7 +906,7 @@ if have lspci; then
   # emptiness called that host broken, which is the over-warning half of the
   # exit-code contract: it made CI red on every run this workflow ever made,
   # blaming lspci for hardware the runner genuinely does not have.
-  PCIRAW=$("${TMO[@]}" lspci -nnk 2>/dev/null || true)
+  PCIRAW=$(${TMO[@]+"${TMO[@]}"} lspci -nnk 2>/dev/null || true)
   PCIOUT=$(printf '%s\n' "$PCIRAW" | awk '
     /^[0-9a-f][0-9a-f]:/ { keep = (tolower($0) ~ /vga|3d controller|display|ethernet|network|raid|sata|non-volatile|serial attached/) }
     keep
@@ -931,7 +949,7 @@ for e in /sys/class/drm/card*-*/edid; do
   [ "${n:-0}" -gt 0 ] || continue
   disp=""
   if have edid-decode; then
-    disp=$("${TMO[@]}" edid-decode 2>/dev/null < "$e" | awk -F': ' '
+    disp=$(${TMO[@]+"${TMO[@]}"} edid-decode 2>/dev/null < "$e" | awk -F': ' '
       /^[[:space:]]*Manufacturer:/                 && v=="" {v=$2}
       /^[[:space:]]*Display Product Name:/         && m=="" {m=$2}
       /^[[:space:]]*Display Product Serial Number:/&& s=="" {s=$2}
@@ -1039,8 +1057,8 @@ fi
 # the flag is the tool's promise rather than ours — T10 caught exactly that,
 # because its stub ignores arguments and answered with 25 lines.
 if have upower && have systemctl \
-   && "${TMO[@]}" systemctl is-active --quiet upower >/dev/null 2>&1; then
-  UPWR=$("${TMO[@]}" upower -e 2>/dev/null | grep -i 'ups' | paste -sd', ' -)
+   && ${TMO[@]+"${TMO[@]}"} systemctl is-active --quiet upower >/dev/null 2>&1; then
+  UPWR=$(${TMO[@]+"${TMO[@]}"} upower -e 2>/dev/null | grep -i 'ups' | paste -sd', ' -)
   [ -n "$UPWR" ] && UPSROWS="${UPSROWS}$(kv "UPower" "$UPWR")
 "
 fi
@@ -1180,9 +1198,9 @@ fi
 # stopped daemon, or a user outside the docker group, is a legitimate state and
 # the section is skipped. Past the gate the daemon answered, so a collector
 # that then returns nothing has failed.
-if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
+if have docker && ${TMO[@]+"${TMO[@]}"} docker info >/dev/null 2>&1; then
   printf '### Docker\n\n```\n'
-  DVER=$("${TMO[@]}" docker version --format 'Docker {{.Server.Version}}' 2>/dev/null)
+  DVER=$(${TMO[@]+"${TMO[@]}"} docker version --format 'Docker {{.Server.Version}}' 2>/dev/null)
   printf '%s\n' "$DVER"
   [ -z "$DVER" ] && warn '`docker version` returned nothing although the daemon answered `docker info`.'
   printf '```\n\n'
@@ -1192,7 +1210,7 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
   # was the one section still dumped as `docker ps -a`'s raw fixed-width
   # columns inside a code fence. Same source, same read, just parsed instead
   # of piped straight through.
-  DPSRAW=$("${TMO[@]}" docker ps -a --format $'{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null)
+  DPSRAW=$(${TMO[@]+"${TMO[@]}"} docker ps -a --format $'{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null)
   DPSROWS=""
   if [ -n "$DPSRAW" ]; then
     while IFS=$'\t' read -r cname cimage cstatus cports; do
@@ -1219,7 +1237,7 @@ if have docker && "${TMO[@]}" docker info >/dev/null 2>&1; then
   # file, so there is no early-close reason to cap the read itself — and the
   # truncation marker for this one site is deferred to after the container
   # networks table, where it can no longer land inside anyone's argument list.
-  CNAMES_ALL=$("${TMO[@]}" docker ps -a --format '{{.Names}}' 2>/dev/null)
+  CNAMES_ALL=$(${TMO[@]+"${TMO[@]}"} docker ps -a --format '{{.Names}}' 2>/dev/null)
   CNAMES=$(printf '%s\n' "$CNAMES_ALL" | head -n "$DOCKER_LIST_LIMIT")
   # Below the limit the two are byte-identical — command substitution strips
   # trailing newlines from both sides — and above it one is a strict prefix of
@@ -1255,7 +1273,7 @@ fi
 # ---------------------------------------------------------------- SERVICES --
 # An empty `--failed` list is the healthy case, never a warning.
 if have systemctl; then
-  FAILED=$("${TMO[@]}" systemctl --failed --no-legend --no-pager 2>/dev/null | cap "$SYSTEMD_FAILED_LINES" "failed unit lines")
+  FAILED=$(${TMO[@]+"${TMO[@]}"} systemctl --failed --no-legend --no-pager 2>/dev/null | cap "$SYSTEMD_FAILED_LINES" "failed unit lines")
   printf '### Failed systemd units\n\n'
   if [ -n "$FAILED" ]; then
     printf '```\n%s\n```\n\n' "$FAILED"

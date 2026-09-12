@@ -32,15 +32,15 @@ That is not "nothing left to do", and the difference matters more now than it di
 when this list was full. Three bodies of work sit outside this file by design,
 and an empty **Remaining** is exactly when they get forgotten:
 
-- **Code review round two is adjudicated down to its CRITICAL and one HIGH only.**
-  `R2-001` and `R2-002` are done; the other **25 of 27 findings have never been
-  through `/adjudicate`** and therefore cannot appear here, accepted or rejected.
-  Four were re-checked against the file on 2026-09-12 and are still live: F-003
-  (`pveversion` unwrapped against a FUSE mount, while the same binary is wrapped
-  120 lines below), F-007 (`"${TMO[@]}"` under `set -u` below bash 4.4), F-009
-  (BusyBox `free -h`), F-014 (`paste -sd', '` cycling its delimiters). The
-  documents are in [`reviews/`](reviews/); the count line is at the head of the
-  `R2-` section in [`DISPOSITIONS.md`](DISPOSITIONS.md).
+- **Code review round two is adjudicated down to its CRITICAL and all three
+  HIGHs.** `R2-001` through `R2-004` are done; the other **23 of 27 findings
+  have never been through `/adjudicate`** and therefore cannot appear here,
+  accepted or rejected. Two that were re-checked against the file on 2026-09-12
+  are still live: F-009 (BusyBox `free -h` warns falsely on a host whose
+  `/proc/meminfo` is readable) and F-014 (`paste -sd', '` cycles its delimiters,
+  so three items join as `a,b c`). The documents are in [`reviews/`](reviews/);
+  the count line is at the head of the `R2-` section in
+  [`DISPOSITIONS.md`](DISPOSITIONS.md).
 - [`PRIOR-ART.md`](PRIOR-ART.md) holds leads that have never been adjudicated
   either.
 - Open entries in [`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is
@@ -83,6 +83,24 @@ Verified against the file and covered by `tests/run.sh` where testable.
   its `## <hostname>` heading replaced with the fixed `## Hardware inventory`, so a
   consumer pasting the report into a hand-written document has a heading-level-agnostic
   boundary and no longer a title that collides with the document's own. Issue #5. v10.
+- **R2-003** — all 24 `"${TMO[@]}"` expansions changed to the empty-array-safe
+  `${TMO[@]+"${TMO[@]}"}`. Below bash 4.4 the bare form is an unbound variable
+  under `set -u` when the array is empty — which is precisely the host with no
+  `timeout` installed, the one the fallback exists for. Two sites are in the
+  main shell, where that abort truncates the report instead of emptying one
+  capture; the second of them was added by FR-004 four months *after* the review
+  named the first. T1 greps for the bare form (comments stripped — it failed on
+  the comment that names it before it failed on any code), and **T20 runs the
+  script with no `timeout` on `PATH` at all**, which no test in this suite had
+  ever done. Not reproducible here: bash 5.3.15.
+- **R2-004** — `pveversion` on the Identity line wrapped in `tmo 10`. It read
+  `/etc/pve` unwrapped — pmxcfs, a FUSE mount that blocks rather than fails when
+  the node loses quorum — while the same binary was already wrapped 700 lines
+  below. It is the earliest collector in the file, so it stalled the run before
+  any section printed. The check is a fixture edit, not a new test:
+  `badbin/pveversion` exited 1 for every call, and an error is not how a wedged
+  FUSE mount fails, so T3 never saw it. It now sleeps on the bare call.
+  Mutation-verified: unwrapped RC=124 with no footer, wrapped RC=1 complete.
 - **R2-001** — `nolog` passed to the three `perccli`/`storcli` calls, which otherwise
   write `storcli.log` into the working directory: a `show` verb that writes, which is why
   no banned-verb list could see it. T1 greps for the keyword instead of a verb, and T13's
