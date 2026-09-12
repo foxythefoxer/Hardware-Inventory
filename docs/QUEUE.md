@@ -30,10 +30,26 @@ consider"; it means nothing left that has been agreed to.
   emits `model: null` with the value sitting in a readable file. Accepted with
   binding conditions.
 
-**FR-004 is the only item left, and what blocks it is an answer, not effort.**
-FT-006 wants the unprivileged-LXC half before the code is written; the
-whitebox-desktop half was answered on this machine on 2026-09-07. Everything
-else accepted has been implemented — v7, below.
+**FR-004 is the only item left, and as of 2026-09-09 nothing blocks it but
+effort.** FT-006 is answered on both halves and is closed: the whitebox-desktop
+half on this machine on 2026-09-07 (`0444` on the four fields, `0400` on the
+serials), the unprivileged-LXC half from the estate on 2026-09-09.
+
+**The LXC answer makes the container gate mandatory rather than precautionary,
+so implement that condition first.** `/sys/devices/virtual/dmi/id/` **exists and
+is populated inside an unprivileged LXC**, and `dmidecode` fails there — so a
+container is precisely where the fallback would fire, and precisely where it must
+not, or every container on a Proxmox node reports the node's motherboard as its
+own in the machine-readable `model:` field. The condition was written
+**unverified** for want of a container; it is now verified in the direction that
+makes it load-bearing. Gate on `systemd-detect-virt -c`, not on
+`PLATFORM != bare-metal` — a real VM's SMBIOS identity is legitimate inventory.
+
+Two of FR-004's conditions remain unverified and neither is a blocker: the
+placeholder-string filter (`To Be Filled By O.E.M.` and friends — this board
+fills its DMI properly), and whether a container sees the host's DMI *values* or
+synthetic ones, which cannot change the verdict because the gate skips both.
+Everything else accepted has been implemented — v7, below.
 
 **Read the ledger entry before implementing any of these FRs.** FR-004 is the
 one left; the note below applies to it, and applied to FR-001 and FR-002 when
@@ -97,18 +113,40 @@ Verified against the file and covered by `tests/run.sh` where testable.
   stat-0 gate is the one that needed a fixture trick: a committed 128-byte file
   has a 128-byte `stat`, so a `[ -s ]` regression passed the whole suite until
   `card1-DP-8/edid` was made a symlink to a procfs file — the one thing
-  available that stats as 0 and still reads non-empty. Unproven off this host
-  class: the headless case, where the section must stay silent (**FT-003**), and
-  the `strings` fallback against real panel EDID rather than the fixture
-  (**FT-004**).
+  available that stats as 0 and still reads non-empty. **Both off-host cases came
+  back on 2026-09-09.** FT-003: a server with a GPU installed and nothing plugged
+  into it renders no section — a connector node with no EDID behind it, which is
+  the case the entry called interesting. FT-004: the `strings` fallback recovers a
+  legible panel model from a real eDP panel, no empty rows and no control
+  characters, with a trailing padding space that is **deliberately not trimmed**
+  (it renders identically inside a table cell, and the section already says the
+  fields are not separated). Still open on FT-004: whether the section survives an
+  *unprivileged* run on a distribution whose EDID files may not be world-readable
+  — only the root run was made.
 - **FR-002** — UPS detection, sysfs `idVendor` as the primary signal, with
   apcupsd config, `apcaccess`, UPower and `power_supply` layered on top of it.
   T16 covers both directions, and the negative half runs under T8's stripped
   `PATH` so it does not depend on what is installed on whoever's machine runs
-  the suite. **The `power_supply` and `apcaccess` rows are unverified against a
-  live daemon** — this host has the UPS attached with neither apcupsd nor NUT
-  installed, which is precisely why sysfs is the gate. Confirm those two rows
-  on a host running apcupsd (**FT-001**); the no-UPS-at-all case is **FT-002**.
+  the suite. **Verified against a live daemon on 2026-09-09** (FT-001, an Unraid
+  host running apcupsd on a USB UPS): all three rows populate as root, and the
+  `apcupsd config` row **survives an unprivileged run**, which was the open
+  question — `/etc/apcupsd/apcupsd.conf` is read through `[ -r ]` and its mode
+  varies by distribution. FT-002 confirms the silent negative on a host with
+  nothing UPS-shaped, and FT-002b the harder negative: a laptop with `AC`, `BAT0`
+  and two USB-C PD source entries emits no section, because the gate is
+  `grep -lx UPS */type` and not the directory's existence. That last one is now
+  staged as a fixture in T16's negative half, which had been reading the runner's
+  own `/sys/class/power_supply`.
+- **CI-005** — T10's under-cap assertion grepped the *whole report* for `---
+  truncated` while stubbing only `systemctl`, so any of `cap()`'s ~20 other sites
+  truncating correctly failed a test about systemd. Issue #4, reported from the
+  first run of this suite on real privileged server hardware (BMC + MegaRAID);
+  green on a desktop and in CI, which have neither. Reproduced here without that
+  hardware by stubbing `systemctl` under its cap and `lspci` over its own.
+  Scoped to `### Failed systemd units` rather than to the marker's wording, so a
+  leak under any other noun still fails. **CI-004's class a fourth time** — it
+  fixed the assertions that turned on `$RC` and left the ones that turn on a
+  substring; the rule in `collectors.md` now covers every channel.
 - **CI-004** — T2, T12 and T17 asserted `exit 0` against the *live* host, so any
   collector the runner happened to degrade failed a test about something else. The
   `v6` tag caught it: `a476d3f` was green on one runner and red on the next, on an

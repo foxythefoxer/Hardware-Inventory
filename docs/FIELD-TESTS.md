@@ -13,16 +13,22 @@ the operator picks up what to run elsewhere. **It is the only record of an
 unverified branch.** `docs/QUEUE.md` tracks work that is not done; this tracks
 work that is done but only proven on one host class.
 
-**Round one came back on 2026-09-09 and the channel works.** Six entries closed,
-four came back partial, one entry was found *defective as written* (FT-012, an
-ambiguous instruction that would have recorded a false measurement), and one
-answer found a defect in the test suite that no CI runner could ever produce
-(CI-005, via FT-007). Two things follow for whoever files the next entry. An
-answer that arrives partial is the normal case, not a failure — it is why each
+**Round one came back on 2026-09-09 and the channel works.** Seven entries are
+answered, two came back partial and stayed open, one entry was found *defective as
+written* (FT-012, an ambiguous instruction that would have recorded a false
+measurement), and one answer found a defect in the test suite that no CI runner
+could ever produce (CI-005, via FT-007). Three things follow for whoever files the
+next entry.
+
+An answer that arrives partial is the normal case, not a failure — it is why each
 entry says the *smallest* thing that settles it, so a half-answer is still worth
-having. And **an answer can be wrong**: two came back measuring something other
+having. **An answer can also be wrong**: two came back measuring something other
 than what the entry asked (`test -r` as root, `is-active` on an absent unit), and
-both were caught only because the operator said which run each came from.
+both were caught only because the operator said which run each came from. And
+**a partial answer can still close an entry** — FT-006 did, because the half that
+came back decided the design and no measurement of the missing half could have
+changed the verdict. Ask what the answer is *for* before asking for the rest of
+it; an entry kept open at 90% costs someone a trip to a machine for nothing.
 
 ---
 
@@ -136,62 +142,6 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   ```bash
   bash hw-inventory.sh | grep -c '^### Displays'
   ```
-
-### FT-006 — DMI files without root (FR-004, before implementing it)
-
-- **Needs:** two answers, from two classes: an **unprivileged Proxmox LXC**, and a
-  **normal user shell on a whitebox desktop**.
-- **Why not here:** FR-004 proposes filling model and motherboard from
-  `/sys/devices/virtual/dmi/id/` when `dmidecode` is absent or unprivileged. This
-  machine is bare metal, where that directory always exists — the case that
-  decides whether the feature needs a gate or has a silent hole is a container,
-  which may have no such directory at all. Answer this **before** the
-  implementation, not after.
-- **Run:**
-  ```bash
-  ls /sys/devices/virtual/dmi/id/ 2>&1 | head -20
-  bash -c 'for f in sys_vendor product_name board_name bios_version; do
-    test -r /sys/devices/virtual/dmi/id/$f && echo "$f readable" || echo "$f NOT readable"
-  done'
-  ```
-- **Run as:** **unprivileged, and it matters more here than anywhere.** The whole
-  question is what a non-root run can see; a `sudo` answer to FT-006 is not a
-  weaker answer, it is an answer to a different question.
-- **Send back:** the listing (or the error, if the directory is absent — that is
-  the answer for an LXC) and the four readable/not lines, per host class. Values
-  are not wanted, only whether they can be read.
-- **Half answered, 2026-09-07, on the development host** (whitebox desktop, bare
-  metal, ordinary user shell — the "normal user shell on a whitebox desktop"
-  class this entry asks for, which is what this machine already is):
-  the directory exists and all four of `sys_vendor`, `product_name`,
-  `board_name`, `bios_version` are readable unprivileged, mode `0444`. But
-  `product_serial`, `board_serial`, `chassis_serial` and `product_uuid` are mode
-  `0400 root:root` and **not** readable. So the FR-004 fallback can fill model,
-  motherboard and BIOS without root, and can never fill a serial that way — the
-  serial rows stay root-gated on `dmidecode` no matter what this feature does.
-  **Still open: the unprivileged LXC half**, which is the one that decides
-  whether FR-004 needs a gate for a missing directory.
-- **The decisive half is answered, 2026-09-09**, on an unprivileged Debian LXC on
-  a Proxmox host — the class this entry asks for. **`/sys/devices/virtual/dmi/id/`
-  exists in the container** and lists the same field set as the desktop half
-  above. So **FR-004 needs no gate for a missing directory on this container
-  class**, which is what this entry was opened to decide, and it was reached by
-  `pct exec` (root inside the container) — sound for this question, because a
-  directory's existence does not turn on the caller's privilege.
-  - Corroboration from the same run: `dmidecode` failed entirely under `pct exec`,
-    both system identity and memory. Consistent with sysfs being the only route to
-    these fields on this class, which is the situation FR-004 exists for.
-- **Still open, and the entry's own command cannot answer it.** The readability
-  half was run as `test -r` **as root**, which returns true for a `0400
-  root:root` file and so measures nothing about an ordinary user. The desktop half
-  above got this right by capturing modes. Ask for the modes, not the test — one
-  command, and it answers for a non-root caller without needing one:
-  ```bash
-  pct exec <CTID> -- ls -l /sys/devices/virtual/dmi/id/ | awk '{print $1, $NF}'
-  ```
-  The pass is `0444` on `sys_vendor`, `product_name`, `board_name` and
-  `bios_version`. Field names and modes only — no values, and the serials are
-  expected to be `0400` as they are on bare metal.
 
 ### FT-008 — the megaraid probe target, on a host with a controller (C-016)
 
@@ -601,3 +551,41 @@ A Proxmox host with `local-zfs` and both guest disks on it: `lsblk` shows `zd0`,
 `zd[0-9]`. First run against real zvols rather than the reasoning that
 `TYPE=="disk"` alone would not catch them (C-012). Root run, which the entry
 invited as a bonus; that same pass is what produced the FT-007 material.
+
+### FT-006 — answered, both halves. **FR-004 is unblocked, and its container gate is load-bearing.**
+
+The desktop half was answered on this machine on 2026-09-07: `sys_vendor`,
+`product_name`, `board_name` and `bios_version` readable unprivileged at `0444`;
+`product_serial`, `board_serial`, `chassis_serial` and `product_uuid` at `0400
+root:root` and not. So the fallback can fill model, motherboard and BIOS without
+root and can never fill a serial that way.
+
+The LXC half, 2026-09-09, on an unprivileged Debian LXC on a Proxmox host:
+**`/sys/devices/virtual/dmi/id/` exists in the container and lists the same field
+set as bare metal.** Reached by `pct exec`, i.e. root inside the container — sound
+for this question, because a directory's existence does not turn on the caller's
+privilege. From the same run, `dmidecode` failed entirely there, both system
+identity and memory.
+
+**Read against FR-004's conditions, that is the opposite of a clean bill, and it
+is the more useful answer.** The entry was framed as "does the feature need a gate
+for a *missing* directory" — it does not. But FR-004's binding condition is the
+other one: *skip the fallback inside containers, because an LXC generally sees the
+host's sysfs and a naive read would report the Proxmox node's motherboard as the
+container's own, in the machine-readable `model:` field.* That condition was
+marked **unverified — no container available in this environment**. It is now
+verified in the direction that makes the gate mandatory: the directory is there,
+it is populated, and `dmidecode` is not available to contradict it, so **a
+container is exactly where the fallback would fire and exactly where it must not.**
+`systemd-detect-virt -c` is the gate, not `PLATFORM != bare-metal`.
+
+**The unanswered remainder is moot, and is not being re-asked.** The LXC
+readability check was run as `test -r` under `pct exec`, which returns true for a
+`0400 root:root` file and so measures nothing about an ordinary user — a real
+defect in that answer. It no longer matters: the container gate means the fallback
+never runs in a container, so whether an unprivileged container caller can read
+those files cannot change any line of the implementation. Nor can the one question
+genuinely left open — whether the container sees the host's DMI *values* or
+synthetic ones — because the verdict is "skip" either way: the host's values are
+wrong, and synthetic ones are meaningless. **No further measurement can move this,
+which is why it closes rather than staying open at 90%.**
