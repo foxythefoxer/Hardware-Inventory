@@ -259,9 +259,15 @@ grep -q '^| appdata | prefer |' "$TMP/u.md" && ok "share row: name from filename
 grep -q '^| crlf | no |  | mostfree | disk1 |$' "$TMP/u.md" \
   && ok "CRLF share row stays on one line" \
   || bad "CRLF share row broken — a CR is reaching the table"
-grep -q '^Flash identity: `NAME=FIXTURE_NAME,COMMENT=FIXTURE_COMMENT`$' "$TMP/u.md" \
-  && ok "CRLF flash identity joins on one line" \
-  || bad "flash identity wrong — a CR is reaching the joined line"
+# The separator is `, ` and not `,` because R2-007 replaced `paste -sd', '`
+# here. Two items were the case the review called safe, and they were not: with
+# two lines paste only ever reaches the FIRST delimiter of its cycle, so this
+# cell rendered `,` while every call site asked for `, `. Not mangled, just
+# quietly not what the code said — which is why this assertion is written
+# against the whole line rather than a substring.
+grep -q '^Flash identity: `NAME=FIXTURE_NAME, COMMENT=FIXTURE_COMMENT`$' "$TMP/u.md" \
+  && ok "CRLF flash identity joins on one line, with the separator asked for" \
+  || bad "flash identity wrong — a CR is reaching the joined line, or the join separator is wrong"
 
 # -------------------------------------------------------------- T5 proxmox ---
 head_ "T5  Proxmox LXC and VM parsing"
@@ -272,6 +278,15 @@ grep -q '^| 301 | vm-proxy01' "$TMP/p.md" && ok "VM row parsed"  || bad "VM row 
 grep -q '198.51.100.4/24' "$TMP/p.md"         && ok "LXC IP extracted from net0" || bad "LXC IP missing"
 grep -qE '^\| 202 .*\| yes \|' "$TMP/p.md" && ok "unprivileged flag mapped to yes" || bad "unprivileged flag wrong"
 grep -q 'media=cdrom' "$TMP/p.md"         && bad "cdrom leaked into VM disk list" || ok "cdrom excluded from disks"
+
+# R2-007, the case a two-item join cannot show. `paste -sd'; '` cycles its
+# delimiters, so three disks joined as `a;b c` — the third separator silently
+# became a bare space and a consumer splitting the cell on "; " got two disks
+# where the VM has three. Asserted on the whole cell: a grep for one disk name
+# passes against the broken output too, since the damage is between items.
+grep -qF '| scsi0=local-zfs:vm-301-disk-0,size=21G; scsi1=local-zfs:vm-301-disk-1,size=100G; scsi2=local-zfs:vm-301-disk-2,size=500G |' "$TMP/p.md" \
+  && ok "three VM disks join with a real separator, not a delimiter cycle" \
+  || { bad "three-item join wrong — paste -d cycling is back:"; grep -o 'scsi0=[^|]*' "$TMP/p.md" | sed 's/^/        /'; }
 
 # ----------------------------------------------------------------- T6 perc ---
 head_ "T6  PERC / MegaRAID with sparse device IDs"
@@ -1105,6 +1120,109 @@ grep -q '^### Docker' "$TMP/notmo.md" \
 grep -q 'Docker NOTMO-28.0' "$TMP/notmo.md" \
   && ok "unwrapped command's output reached the report" \
   || bad "command ran but its output was lost with an empty TMO"
+
+# --------------------------------------------------------- T21 megaraid base --
+# R2-009. The miss counter was armed from the first iteration, so a controller
+# numbering its drives from 10 upward was abandoned at ID 9 with its whole
+# array behind it — and the section then PRINTED that no drives answered, which
+# is a wrong answer rather than a missing one.
+#
+# T6's fixture answers at IDs 0, 1, 8 and 9, so the suite could not see this:
+# every one of those is below the threshold. This is the same fixture shape
+# with the answers moved up, which is the entire difference.
+head_ "T21 MegaRAID drives based above the miss threshold"
+
+# is_root is simulated rather than required, unlike T6's probe half, so this
+# runs on every host instead of only under sudo and CI's root pass. The probe
+# is the branch being tested and it is root-gated; the copy is the documented
+# way to reach it (.claude/rules/collectors.md).
+sed 's/^is_root() .*/is_root() { true; }/' "$SCRIPT" > "$TMP/mr.sh"
+grep -q '^is_root() { true; }$' "$TMP/mr.sh" \
+  && ok "root simulated against a copy" || bad "is_root() not replaced — the probe branch is unreachable"
+
+mkdir -p "$TMP/mr12"
+cat > "$TMP/mr12/smartctl" <<'EOF'
+#!/bin/bash
+[ "$1" = "--scan" ] && { echo "/dev/sdb -d scsi # /dev/sdb, SCSI device"; exit 0; }
+N=""; for a in "$@"; do case "$a" in megaraid,*) N="${a#megaraid,}";; esac; done
+# Answers ONLY at 12 through 15 — the case the old bound could never reach.
+case "$N" in
+  12|13|14|15)
+    printf 'Device Model:     FIXTURE-MR-BASE12\n'
+    printf 'Serial Number:    BASE12-ID-%s\n' "$N"
+    printf 'SMART overall-health self-assessment test result: PASSED\n'
+    exit 0;;
+esac
+echo "failed: No such device" >&2; exit 2
+EOF
+chmod +x "$TMP/mr12/smartctl"
+
+PATH="$TMP/mr12:$FIX/percbin:$TMP/minbin" bash "$TMP/mr.sh" > "$TMP/mr12.md" 2>/dev/null; RC=$?
+
+# Every assertion matches a string this fixture invented, never the live host.
+for n in 12 13 14 15; do
+  grep -q "BASE12-ID-$n" "$TMP/mr12.md" \
+    && ok "drive at device ID $n found" || bad "drive at ID $n missed — the miss counter is armed before the first hit"
+done
+grep -q 'No drives answered' "$TMP/mr12.md" \
+  && bad "reported an empty array on a host whose drives answered at 12-15" \
+  || ok "does not claim the controller is empty"
+# The sparse-ID tradeoff must SURVIVE the fix: past the first hit, ten
+# consecutive misses still stop the walk. 15 + 10 = 25, so nothing past 25 is
+# probed and the stub answers nothing there anyway — what this asserts is that
+# the loop ended rather than running to 31 on every host with a controller.
+grep -q 'megaraid,26' "$TMP/mr12.md" \
+  && bad "probe ran past the miss threshold after its last hit" || ok "miss threshold still stops the walk after the last hit"
+rc_agrees "$RC" "$TMP/mr12.md"
+
+# ------------------------------------------------------------ T22 fallbacks --
+# Two collectors that answered a question the tool does not answer, and warned
+# as though the tool had failed. Both are the same shape: the data was readable
+# the whole time and the report said it was unknown.
+head_ "T22 Degraded-tool fallbacks (BusyBox free, unreadable guest config)"
+
+# --- R2-006: BusyBox free rejects -h ---
+mkdir -p "$TMP/bbfree"
+# BusyBox free takes -b/-k/-m/-g and rejects -h, exactly like this.
+printf '#!/bin/sh\necho "free: unrecognized option: h" >&2\nexit 1\n' > "$TMP/bbfree/free"
+chmod +x "$TMP/bbfree/free"
+
+PATH="$TMP/bbfree:$TMP/minbin" bash "$SCRIPT" > "$TMP/bb.md" 2>"$TMP/bb.err"; RC=$?
+# Scoped to the warnings block and to this collector by name (CI-005): the run
+# is on minbin, so anything else that warns is a fact about the runner.
+sed -n '/^## Collection warnings/,$p' "$TMP/bb.md" | grep -q 'free' \
+  && { bad "warned about free on a host where /proc/meminfo is readable:"; dumpwarn "$TMP/bb.md"; } \
+  || ok "no false warning when free rejects -h"
+grep -qE '^\| Total RAM \| [0-9]+Gi \|' "$TMP/bb.md" \
+  && ok "RAM total recovered from /proc/meminfo" \
+  || { bad "RAM total empty though /proc/meminfo has MemTotal:"; grep -E '^\| Total RAM' "$TMP/bb.md" | sed 's/^/        /'; }
+grep -qE '^ram: "[0-9]+Gi"' "$TMP/bb.md" \
+  && ok "frontmatter ram: filled from the fallback" || bad "frontmatter ram: still null"
+[ ! -s "$TMP/bb.err" ] && ok "stderr empty — the usage error is swallowed" \
+  || { bad "BusyBox free's usage error reached stderr:"; sed 's/^/        /' "$TMP/bb.err"; }
+
+# --- R2-011: pct config fails for every guest it listed ---
+# The worst shape of it: `pct list` names three containers, every config read
+# fails, the whole table disappears, and the script exited 0 — which reads as
+# "this node has no containers" on a node with three.
+mkdir -p "$TMP/pctbad"
+cat > "$TMP/pctbad/pct" <<'EOF'
+#!/bin/bash
+case "$1" in
+list) printf 'VMID       Status     Lock         Name\n201        running                 a\n202        running                 b\n203        running                 c\n';;
+config) echo "cannot read config" >&2; exit 2;;
+status) echo "status: running";;
+esac
+EOF
+chmod +x "$TMP/pctbad/pct"
+
+PATH="$TMP/pctbad:$TMP/minbin" bash "$TMP/mr.sh" > "$TMP/pctbad.md" 2>/dev/null; RC=$?
+sed -n '/^## Collection warnings/,$p' "$TMP/pctbad.md" | grep -q 'pct config' \
+  && ok "names pct config when every guest read fails" \
+  || { bad "three containers vanished from the report in silence:"; dumpwarn "$TMP/pctbad.md"; }
+sed -n '/^## Collection warnings/,$p' "$TMP/pctbad.md" | grep -q 'for 3 of the containers' \
+  && ok "warning counts the dropped guests" || bad "warning does not say how many rows are missing"
+rc_agrees "$RC" "$TMP/pctbad.md"
 
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hw-inventory.sh v10 — emit a Markdown block describing this host.
+# hw-inventory.sh v11 — emit a Markdown block describing this host.
 #
 # Read-only. Collects nothing off-box, writes nothing, sends nothing.
 # Every command is a query. Deliberately absent: smartctl -t (self-tests),
@@ -63,6 +63,24 @@ MEGACLI_LD_LINES=60          # MegaCLI logical/virtual drive listing.
 MEGACLI_PD_LINES=90          # MegaCLI physical-drive listing — one block of
                               # named fields per drive, so this scales with
                               # drive count, unlike the IPMI field caps below.
+
+# ------------------------------------------------------------ time bounds --
+# NOT cap() constants: these bound elapsed SECONDS, not output lines, and a
+# section they cut short IS a collector failure, so unlike cap() they warn.
+# `SECONDS` is a bash builtin (2.0), so reading it executes nothing.
+MEGARAID_PROBE_S=90          # whole `-d megaraid,N` walk across {0..31}. A miss
+                              # on an absent ID returns immediately, so the walk
+                              # normally costs ~2s and this only bounds the
+                              # pathological case where every call hangs its
+                              # full `tmo 6`.
+RUN_BUDGET_S=600             # checked at the top of the two Proxmox guest
+                              # loops, which are the only other region that
+                              # scales with host size — 28 guests at tmo 10
+                              # twice over is 630s of a ~20 minute arithmetic
+                              # worst case (R2-010). This is a bound on the
+                              # variable part of the run, not an aggregate
+                              # deadline: the fixed collectors cannot be cut
+                              # short without abandoning a half-written section.
 
 # Filesystems and pools
 FS_TABLE_LINES=60            # df -hT and findmnt real-mount tables.
@@ -205,6 +223,24 @@ row() {
 
 kv() { row "$1" "${2:-$NA}"; }
 
+# Join stdin's lines with a real multi-character separator.
+#
+# NOT `paste -sd', '` (R2-007). paste treats -d's argument as a SET of
+# delimiters applied CIRCULARLY, not as one separator. Measured here:
+#
+#   printf 'a\nb\nc\n' | paste -sd', ' -   ->  a,b c
+#   printf 'a\nb\n'    | paste -sd', ' -   ->  a,b
+#
+# Two items look correct, which is why eight call sites carried it unnoticed.
+# Three do not — and three is the ordinary case for /etc/resolv.conf and for a
+# Proxmox VM's disk list. Nothing is lost, every value still reaches the cell,
+# but a consumer splitting on ", " gets two fields where the host has three, so
+# it is a fidelity defect in output this project treats as ground truth.
+#
+# A single-character delimiter cannot cycle, so `paste -sd' '` in the display
+# section is correct as written and is deliberately left alone.
+joinby() { awk -v s="$1" '{printf "%s%s", sep, $0; sep=s}'; }
+
 # YAML-safe scalar for the frontmatter block.
 yk() {
   local v=${2:-}
@@ -276,8 +312,19 @@ CPUMODEL=$(printf '%s\n' "$LSCPU" | awk -F: '/^Model name/{gsub(/^[ \t]+/,"",$2)
 FREE=""
 have free && FREE=$(${TMO[@]+"${TMO[@]}"} free -h 2>/dev/null)
 RAMTOTAL=$(printf '%s\n' "$FREE" | awk '/^Mem:/{print $2}')
+# BusyBox `free` takes -b/-k/-m/-g and REJECTS -h, so on an Alpine host without
+# procps the usage error goes to the stderr above, FREE is empty, and this warned
+# that free reported no total memory while the number sat readable in
+# /proc/meminfo (R2-006). By the letter of the contract that warning is
+# defensible — free was present, permitted, and returned nothing. By its intent
+# it is wrong: the tool did not fail, we asked it a question it does not answer.
+# Same fallback the CPU model takes to /proc/cpuinfo ten lines above; warn only
+# when BOTH are silent, or every musl host reports a broken collector.
+if [ -z "$RAMTOTAL" ]; then
+  RAMTOTAL=$(awk '/^MemTotal:/{printf "%.0fGi", $2/1048576}' /proc/meminfo 2>/dev/null)
+fi
 if have free && [ -z "$RAMTOTAL" ]; then
-  warn '`free` is installed but reported no total memory — RAM fields are empty.'
+  warn '`free` reported no total memory and /proc/meminfo had no MemTotal — RAM fields are empty.'
 fi
 
 PLATFORM="bare-metal"
@@ -341,7 +388,7 @@ if have lsblk; then
 fi
 
 # ============================================================ frontmatter ===
-printf '<!-- hw-inventory:begin host=%s collected=%s collector=hw-inventory.sh/v10 -->\n\n' \
+printf '<!-- hw-inventory:begin host=%s collected=%s collector=hw-inventory.sh/v11 -->\n\n' \
   "$HOST" "$(date -Iseconds)"
 printf -- '---\n'
 yk host "$HOST"
@@ -355,7 +402,7 @@ yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
 printf 'collected: %s\n' "$(date '+%Y-%m-%d')"
-printf 'collector: hw-inventory.sh v10\n'
+printf 'collector: hw-inventory.sh v11\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 
@@ -533,7 +580,20 @@ fi
 # ---------------------------------------------------------------- STORAGE ---
 printf '### Storage — physical devices\n\n'
 if have lsblk; then
-  fld() { printf '%s' "$2" | sed -n "s/.*[[:space:]]\{0,\}$1=\"\([^\"]*\)\".*/\1/p"; }
+  # Pull one key="value" out of an lsblk -P line. The key is ANCHORED to
+  # start-of-line or a preceding space, and that anchor is load-bearing (R2-005):
+  # the original `.*` prefix was greedy and matched zero leading spaces, so a key
+  # that merely ENDS with the one asked for won that match. Measured — add the
+  # most likely next column and `fld NAME` returns the wrong device:
+  #
+  #   NAME="sda" KNAME="sdz" TYPE="disk"   ->  fld NAME  gave  sdz
+  #
+  # which names a device the row does not describe and points every smartctl
+  # probe downstream at the wrong node. PARTLABEL/LABEL and PKNAME/NAME break
+  # identically. Today's seven columns happen to have distinct suffixes, so the
+  # unanchored form was correct until someone added a column — this is the
+  # `lsblk -P` column-shift bug the comment above warns about, in other clothes.
+  fld() { printf '%s' "$2" | sed -n "s/^\(.*[[:space:]]\)\{0,1\}$1=\"\([^\"]*\)\".*/\2/p"; }
   # Captured rather than printed straight through: the row loop is a pipeline
   # body, so it cannot warn() from inside (G-002). Testing the captured rows
   # out here also keeps the header from being printed above nothing.
@@ -686,16 +746,36 @@ if [ -n "$RAIDCTL" ]; then
       | grep -Ev 'NAME="nvme|TRAN="(usb|nvme)"' \
       | sed -n 's/^NAME="\([^"]*\)".*/\1/p' | head -1)
     if [ -n "$MRTGT" ]; then
-      MRROWS=""; misses=0
+      MRROWS=""; misses=0; hits=0; probe_start=$SECONDS; probe_cut=""
       for n in {0..31}; do
+        # The miss counter is armed only AFTER the first drive answers
+        # (R2-009). Armed from n=0 it gave up at ID 9, so a controller
+        # numbering its drives from 10 upward lost its ENTIRE array. Measured
+        # against a stub answering at chosen IDs: base 0 found 4 of 4, base 9
+        # found 3 of 3, base 10 found 0, base 12 found 0 — and the section then
+        # printed "No drives answered ... may be in HBA/IT mode" on a host
+        # whose array was right there. That is a wrong answer rather than a
+        # missing one, which is the distinction C-016 turned on.
+        #
+        # This supersedes the ledger's "drives skipped at sparse IDs, accepted
+        # as a documented tradeoff": that verdict was about PARTIAL loss past
+        # the threshold, and total loss of a healthy array is a different
+        # finding. The sparse-ID tradeoff still stands past the first hit.
+        #
+        # Before the first hit the walk now covers the whole declared range,
+        # which is affordable because a miss on an absent ID returns at once —
+        # MEGARAID_PROBE_S is here for the pathological case where every call
+        # burns its full `tmo 6`, not for the normal one.
+        if [ "$((SECONDS - probe_start))" -ge "$MEGARAID_PROBE_S" ]; then probe_cut=1; break; fi
         MS=$(tmo 6 smartctl -n standby -H -A -d "megaraid,$n" "/dev/$MRTGT" 2>/dev/null || true)
         if ! printf '%s' "$MS" | grep -qiE '^Device Model:|^Model Number:|^Product:|^Serial Number:'; then
           misses=$((misses + 1))
-          # Device IDs can be sparse; give up only after a long empty run.
-          [ "$misses" -ge 10 ] && break
+          # Device IDs can be sparse; give up only after a long empty run — and
+          # only once something has answered, per the comment above.
+          [ "$hits" -gt 0 ] && [ "$misses" -ge 10 ] && break
           continue
         fi
-        misses=0
+        misses=0; hits=$((hits + 1))
         mdl=$(printf '%s\n' "$MS" | awk -F: '/^Device Model:|^Model Number:|^Product:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
         ser=$(printf '%s\n' "$MS" | awk -F: '/^Serial Number:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
         hlt=$(printf '%s\n' "$MS" | awk -F: '/overall-health|SMART Health Status/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
@@ -707,6 +787,10 @@ if [ -n "$RAIDCTL" ]; then
         MRROWS="${MRROWS}$(row "megaraid,${n}" "${mdl:-$NA}" "${ser:-$NA}" "${hlt:-$NA}" "${poh:-$NA}" "${ra:-$NA}" "${tmp:-$NA}")
 "
       done
+      # A probe cut short by its own clock is a collector failure, not a
+      # truncation: the drives past the cut are unknown, and this table is read
+      # as ground truth about what the controller holds.
+      [ -n "$probe_cut" ] && warn "The \`-d megaraid,N\` probe hit its ${MEGARAID_PROBE_S}s bound before walking every device ID — drives behind the controller may be missing from the table."
       if [ -n "$MRROWS" ]; then
         printf '#### Physical drive SMART (behind controller)\n\n'
         printf '| Device ID | Model | Serial | Health | Power-on hrs | Realloc | Temp |\n'
@@ -807,7 +891,7 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
     # Not a table cell, so row()'s CR strip does not cover this one — and the
     # CR lands between the value and paste's comma, which is what made the
     # separator look misplaced in the report (FR-005).
-    kv2=$(awk -F= '$1=="NAME"||$1=="COMMENT"{gsub(/[\r"]/,"",$2); print $1"="$2}' /boot/config/ident.cfg 2>/dev/null | paste -sd', ' -)
+    kv2=$(awk -F= '$1=="NAME"||$1=="COMMENT"{gsub(/[\r"]/,"",$2); print $1"="$2}' /boot/config/ident.cfg 2>/dev/null | joinby ', ')
     [ -n "$kv2" ] && printf 'Flash identity: `%s`\n\n' "$kv2"
   fi
 fi
@@ -818,12 +902,28 @@ if have df; then
   echo "--- df -hT ---"
   DFOUT=$(${TMO[@]+"${TMO[@]}"} df -hT 2>/dev/null | grep -Ev '^(tmpfs|devtmpfs|efivarfs|overlay|none)' | cap "$FS_TABLE_LINES" "filesystem table lines")
   printf '%s\n' "$DFOUT"
+  # This emptiness test is safe for a reason worth writing down, because the
+  # findmnt one below was not (R2-008): df always prints a header row, and the
+  # filter above cannot remove it, so DFOUT is empty only when df itself
+  # produced nothing. A future change that adds --output= and drops the header
+  # would quietly turn this into the same conflation.
   [ -z "$DFOUT" ] && warn '`df` is installed but reported no real filesystems.'
 fi
 if have findmnt; then
   echo
   echo "--- findmnt (mount options) ---"
   FMOUT=$(${TMO[@]+"${TMO[@]}"} findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | cap "$FS_TABLE_LINES" "filesystem table lines")
+  # --real arrived in util-linux 2.28 (2016); RHEL/CentOS 7 ship 2.23, where it
+  # is an unrecognized option written to the stderr above. That produced an
+  # empty FMOUT and a warning that the host had no mounted filesystems, on a
+  # distribution the README lists as fully supported (R2-008). Falling back to
+  # a type-exclusion list gets the same table off the older flag set. An empty
+  # result here is a failed call either way — no host has zero mounts — so the
+  # warning below stays, it just no longer fires on a version difference.
+  if [ -z "$FMOUT" ]; then
+    FMOUT=$(${TMO[@]+"${TMO[@]}"} findmnt -t nosquashfs,notmpfs,nodevtmpfs,nooverlay \
+      -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | cap "$FS_TABLE_LINES" "filesystem table lines")
+  fi
   printf '%s\n' "$FMOUT"
   [ -z "$FMOUT" ] && warn '`findmnt` is installed but listed no mounted filesystems.'
 fi
@@ -874,7 +974,7 @@ else
     # empty-stderr assertion on someone else's host, to save three forks.
     state=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "$NA")
     mac=$(cat "/sys/class/net/$ifc/address" 2>/dev/null || echo "$NA")
-    addrs=$(${TMO[@]+"${TMO[@]}"} ip -o -4 addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | paste -sd', ' -)
+    addrs=$(${TMO[@]+"${TMO[@]}"} ip -o -4 addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | joinby ', ')
     [ -z "$addrs" ] && addrs="$NA"
     spd=$(cat "/sys/class/net/$ifc/speed" 2>/dev/null)
     if [ -n "$spd" ] && [ "$spd" -gt 0 ] 2>/dev/null; then spd="${spd} Mb/s"; else spd="$NA"; fi
@@ -891,7 +991,7 @@ else
   DEFRT=$(${TMO[@]+"${TMO[@]}"} ip route show default 2>/dev/null | head -1)
   [ -n "$DEFRT" ] && printf 'Default route: `%s`\n\n' "$DEFRT"
   if [ -r /etc/resolv.conf ]; then
-    printf 'Resolvers: `%s`\n\n' "$(awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null | paste -sd', ' -)"
+    printf 'Resolvers: `%s`\n\n' "$(awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null | joinby ', ')"
   fi
 fi
 
@@ -1021,7 +1121,7 @@ for f in /sys/bus/usb/devices/*/idVendor; do
 "
 done
 # Corroboration only — see the gate note above.
-PSUP=$(grep -lx UPS /sys/class/power_supply/*/type 2>/dev/null | sed 's#.*/\([^/]*\)/type$#\1#' | paste -sd', ' -)
+PSUP=$(grep -lx UPS /sys/class/power_supply/*/type 2>/dev/null | sed 's#.*/\([^/]*\)/type$#\1#' | joinby ', ')
 [ -n "$PSUP" ] && UPSROWS="${UPSROWS}$(kv "Kernel power_supply" "$PSUP")
 "
 # The configured intent, which is readable whether or not apcupsd is running —
@@ -1039,7 +1139,7 @@ fi
 if have apcaccess; then
   APCS=$(tmo 10 apcaccess status 2>/dev/null \
     | awk '/^(MODEL|STATUS)[[:space:]]*:/{sub(/[[:space:]]*:[[:space:]]*/,": "); sub(/[[:space:]]+$/,""); print}' \
-    | paste -sd'; ' -)
+    | joinby '; ')
   [ -n "$APCS" ] && UPSROWS="${UPSROWS}$(kv "apcaccess" "$APCS")
 "
 fi
@@ -1058,7 +1158,7 @@ fi
 # because its stub ignores arguments and answered with 25 lines.
 if have upower && have systemctl \
    && ${TMO[@]+"${TMO[@]}"} systemctl is-active --quiet upower >/dev/null 2>&1; then
-  UPWR=$(${TMO[@]+"${TMO[@]}"} upower -e 2>/dev/null | grep -i 'ups' | paste -sd', ' -)
+  UPWR=$(${TMO[@]+"${TMO[@]}"} upower -e 2>/dev/null | grep -i 'ups' | joinby ', ')
   [ -n "$UPWR" ] && UPSROWS="${UPSROWS}$(kv "UPower" "$UPWR")
 "
 fi
@@ -1134,10 +1234,22 @@ if have pveversion || have pct || have qm; then
       warn '`pct list` returned nothing as root — LXC containers could not be enumerated and are absent from the report.'
     fi
     CTIDS=$(printf '%s\n' "$PCTRAW" | awk 'NR>1{print $1}')
-    CTROWS=""
+    CTROWS=""; ctskip=0; ctcut=""
     for id in $CTIDS; do
+      # One of the two regions that scales with host size, and the larger term
+      # in the ~20 minute arithmetic worst case (R2-010). warn() is safe here:
+      # a `for` loop in the main shell is not a subshell, unlike the row
+      # pipelines elsewhere (G-002).
+      if [ "$SECONDS" -ge "$RUN_BUDGET_S" ]; then ctcut=1; break; fi
       CFG=$(tmo 10 pct config "$id" 2>/dev/null || true)
-      [ -z "$CFG" ] && continue
+      # A guest whose config cannot be read was dropped from the table in
+      # silence (R2-011) — and if every call failed the whole table vanished
+      # while the script still exited 0, which reads as "this node has no
+      # containers" on a node full of them. `pct list` already named them, so
+      # their absence here is a collector failure, not an empty host. Counted
+      # and warned once rather than per guest: 28 identical warnings would bury
+      # the block that exists to be read.
+      if [ -z "$CFG" ]; then ctskip=$((ctskip + 1)); continue; fi
       st=$(tmo 10 pct status "$id" 2>/dev/null | awk '{print $2}')
       net0=$(cfgget net0)
       ctip=$(printf '%s' "$net0" | sed -n 's/.*ip=\([^,]*\).*/\1/p')
@@ -1150,6 +1262,8 @@ if have pveversion || have pct || have qm; then
         "${ctip:-$NA}" "${ctbr:-$NA}" "$(cfgget onboot)")
 "
     done
+    [ "$ctskip" -gt 0 ] && warn "\`pct config\` returned nothing for $ctskip of the containers \`pct list\` named — those rows are missing from the LXC table."
+    [ -n "$ctcut" ] && warn "The ${RUN_BUDGET_S}s run budget was reached while reading LXC configs — the container table is incomplete."
     if [ -n "$CTROWS" ]; then
       printf '#### LXC containers\n\n'
       printf '| VMID | Hostname | Status | OS | Cores | RAM | Root disk | Unpriv | Features | IP | Bridge | Onboot |\n'
@@ -1164,19 +1278,23 @@ if have pveversion || have pct || have qm; then
       warn '`qm list` returned nothing as root — QEMU VMs could not be enumerated and are absent from the report.'
     fi
     VMIDS=$(printf '%s\n' "$QMRAW" | awk 'NR>1{print $1}')
-    VMROWS=""
+    VMROWS=""; vmskip=0; vmcut=""
     for id in $VMIDS; do
+      # Same two guards as the LXC loop above, same reasoning (R2-010, R2-011).
+      if [ "$SECONDS" -ge "$RUN_BUDGET_S" ]; then vmcut=1; break; fi
       CFG=$(tmo 10 qm config "$id" 2>/dev/null || true)
-      [ -z "$CFG" ] && continue
+      if [ -z "$CFG" ]; then vmskip=$((vmskip + 1)); continue; fi
       vst=$(tmo 10 qm status "$id" 2>/dev/null | awk '{print $2}')
       vdisks=$(printf '%s\n' "$CFG" | grep -E '^(scsi|virtio|sata|ide)[0-9]+:' \
-        | grep -v 'media=cdrom' | sed 's/: /=/' | paste -sd'; ' -)
-      vnet=$(printf '%s\n' "$CFG" | grep -E '^net[0-9]+:' | sed 's/: /=/' | paste -sd'; ' -)
+        | grep -v 'media=cdrom' | sed 's/: /=/' | joinby '; ')
+      vnet=$(printf '%s\n' "$CFG" | grep -E '^net[0-9]+:' | sed 's/: /=/' | joinby '; ')
       VMROWS="${VMROWS}$(row "$id" "$(cfgget name)" "${vst:-$NA}" "$(cfgget cores)" \
         "$(cfgget memory) MiB" "${vdisks:-$NA}" "${vnet:-$NA}" "$(cfgget ostype)" \
         "$(cfgget onboot)")
 "
     done
+    [ "$vmskip" -gt 0 ] && warn "\`qm config\` returned nothing for $vmskip of the VMs \`qm list\` named — those rows are missing from the QEMU table."
+    [ -n "$vmcut" ] && warn "The ${RUN_BUDGET_S}s run budget was reached while reading VM configs — the virtual machine table is incomplete."
     if [ -n "$VMROWS" ]; then
       printf '#### QEMU virtual machines\n\n'
       printf '| VMID | Name | Status | Cores | RAM | Disks | Network | OS type | Onboot |\n'

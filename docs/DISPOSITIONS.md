@@ -918,10 +918,10 @@ One reviewer this round: **Anthropic Claude Opus 5**, 2026-09-09, against
 [`reviews/`](reviews/), committed unedited but for the Commit SHA cell each one instructed
 be filled in before filing. 27 findings: 1 CRITICAL, 3 HIGH, 7 MEDIUM, 11 LOW, 5 NITPICK.
 
-**Adjudicated so far: 4 of 27** — the CRITICAL and all three HIGHs. The 23 below MEDIUM
-and above have had no verdict, which is the state [`QUEUE.md`](QUEUE.md) warns rots
-fastest, since an unruled finding cannot appear in that file at all. Keep this line
-current; it is the only count anyone reads.
+**Adjudicated so far: 11 of 27** — the CRITICAL, all three HIGHs and all seven MEDIUMs.
+The 16 remaining are the 11 LOW and 5 NITPICK, and they have had no verdict, which is the
+state [`QUEUE.md`](QUEUE.md) warns rots fastest, since an unruled finding cannot appear in
+that file at all. Keep this line current; it is the only count anyone reads.
 
 ### R2-001 — `perccli`/`storcli` invoked without `nolog` — accepted, done
 
@@ -1110,6 +1110,231 @@ line of new test code.
 staged on one anyway. What is measured is that a blocking `pveversion` stops the run and
 that the wrapper bounds it — the FUSE behaviour itself is read from pmxcfs's design, not
 observed.
+
+### R2-005 — `fld()` returns the wrong column if a suffix-sharing key is added — accepted, done
+
+Provenance: Claude Opus 5's `F-008`, MEDIUM.
+
+**Correct today, wrong on the next edit.** `fld()` pulled `key="value"` out of an `lsblk -P`
+line with a greedy `.*` prefix and a `[[:space:]]\{0,\}` that matches zero characters, so the
+key was not anchored to anything. A key that merely *ends* with the one asked for won the
+match instead. The seven columns the script requests happen to have distinct suffixes, so
+nothing is broken in the file as it stands.
+
+**Measured here, and it reproduces the reviewer's result exactly:**
+
+```
+NAME="sda" KNAME="sdz" TYPE="disk" SIZE="1.8T"   ->  fld NAME  returned  sdz
+```
+
+`PARTLABEL` against `LABEL` and `PKNAME` against `NAME` break the same way. The consequence
+is not a blank cell: the device table would **name a device the row does not describe**, and
+every `smartctl` probe built from that name targets the wrong node. Anchored, the same line
+returns `sda`, and all seven current columns still parse unchanged — checked one by one.
+
+**This is the `lsblk -P` column-shift bug in different clothes.** The comment above the
+capture exists specifically to stop a future maintainer simplifying `-P` back into columnar
+output, because columnar silently shifts every cell after an empty field. This is the same
+failure reached through the parser instead of the format.
+
+**The check costs no new test.** `KNAME="MUSTNOTWIN"` goes into T6's `lsblk` fixture, and
+T6's existing `/dev/sdb` row assertion catches the regression for free — verified by
+mutation: un-anchor the pattern and T6 fails with "device row missing or columns shifted".
+The fixture comment records that the script does not request `KNAME` and that the column is
+there to hold the anchor, so nobody deletes it as unrealistic.
+
+### R2-006 — BusyBox `free` rejects `-h`, producing a false warning — accepted, done
+
+Provenance: Claude Opus 5's `F-009`, MEDIUM.
+
+**A warning that is defensible by the letter of the contract and wrong by its intent.**
+BusyBox `free` takes `-b`, `-k`, `-m`, `-g` and rejects `-h`. On Alpine without procps the
+usage error goes to the `2>/dev/null` this call already carries, `FREE` is empty, `RAMTOTAL`
+is empty, and the script warned that `free` reported no total memory — then exited 1. The
+tool was present and permitted and returned nothing, which is exactly the warn condition.
+But `free` did not fail. **We asked it a question it does not answer**, and the answer was
+sitting in `/proc/meminfo` the whole time.
+
+That distinction is worth adding to the exit-code contract's judgment list, because it is
+not currently there: *a tool rejecting our flags is our defect, not its failure.*
+
+**The file already solved this one paragraph above.** The CPU model falls back from `lscpu`
+to `/proc/cpuinfo` ten lines earlier. RAM had no equivalent, and now takes the same one.
+The warning stays but moves below the fallback, so it fires only when both sources are
+silent.
+
+**Not fixed, and deliberately:** the Snapshot rows read `$3` and `$7` of the same `free`
+output and still render blank on such a host. They are cosmetic, the reviewer raised no
+separate finding, and reconstructing them from `/proc/meminfo` means reimplementing `free`'s
+used/available arithmetic — which is a different and worse trade than one `MemTotal` read.
+
+**The check.** T22 stubs a `free` that rejects `-h` exactly as BusyBox does. It asserts the
+absence of the warning *scoped to the warnings block and by name* (CI-005), that the RAM row
+and the frontmatter `ram:` both fill from the fallback, and that stderr stays empty.
+Mutation: drop the fallback and three of the four assertions fail.
+
+### R2-007 — `paste -sd', '` cycles its delimiters — accepted, done
+
+Provenance: Claude Opus 5's `F-014`, MEDIUM.
+
+**`paste -d` takes a delimiter *cycle*, not a separator.** Measured here:
+
+```
+printf 'a\nb\nc\n' | paste -sd', ' -   ->  a,b c
+printf 'a\nb\n'    | paste -sd', ' -   ->  a,b
+```
+
+Eight call sites carried it. A host with three resolvers rendered
+`Resolvers: 192.0.2.1,198.51.100.1 203.0.113.1` — every value present, so this is fidelity
+rather than loss, but a consumer splitting that cell on `", "` gets two fields where the
+host has three. Three is the ordinary case for `/etc/resolv.conf` and for a Proxmox VM's
+disks.
+
+**The review said two items look correct. They were not, and this is the part worth
+keeping.** With two lines `paste` only ever reaches the *first* delimiter of the cycle, so
+the Unraid flash-identity cell rendered `NAME=x,COMMENT=y` while the code asked for `, `.
+Not mangled — just quietly not what was written, at the one site the review cleared as safe.
+That turned up as a T4 failure when the join changed, which is how it was found.
+
+**This is not FR-005 reopened.** That entry diagnosed a CR sitting in front of `paste`'s
+delimiter and concluded correctly that the symptom was not a join bug. It was looking at the
+flash-identity site, which has exactly two items and where the cycling never shows.
+
+**One helper, not eight inline `awk`s** — `joinby`, which is the accumulator idiom already
+in the file at the `apcaccess` site rather than a new construct. `paste -sd' '` in the
+display section is **deliberately left alone**: a single-character delimiter cannot cycle,
+and the comment says so, so nobody "fixes" it later.
+
+**The check.** The VM fixture grew from one disk to three, which is both the defect's
+trigger and the ordinary shape of a guest, and T5 asserts the whole joined cell — a grep for
+one disk name passes against the broken output, since the damage falls between items. T4's
+flash-identity assertion moves to the separator the code actually asks for. Mutation:
+restore `paste -sd` and both fail.
+
+**Report-visible, and the reason this batch mints v11.**
+
+### R2-008 — `findmnt --real` is absent below util-linux 2.28 — accepted, done
+
+Provenance: Claude Opus 5's `F-015`, MEDIUM.
+
+`--real` arrived in util-linux 2.28 (2016). RHEL and CentOS 7 ship 2.23, where it is an
+unrecognized option written to the discarded stderr. `FMOUT` came back empty, the mount
+table was missing from the report, and the script warned that `findmnt` listed no mounted
+filesystems and exited 1 — on a distribution the README's matrix lists as **Full** support.
+
+**An emptiness test conflating two causes**, which is the class
+`.claude/rules/collectors.md` already warns about under "test the thing that actually
+indicates failure". Here emptiness meant either "no mounts" (impossible) or "the flag does
+not exist" (a version difference), and the warning asserted the first.
+
+**Fixed by falling back to a type-exclusion list**, which gets the same table off the older
+flag set. The warning stays: an empty result after both attempts really is a failed call,
+since no host has zero mounts. It just no longer fires on a version difference.
+
+**The `df` test three lines above is safe for a reason nobody had written down**, and it is
+now written down at the site: `df` always prints a header row that the `grep -Ev` filter
+cannot remove, so `DFOUT` is empty only when `df` itself produced nothing. A future change
+that adds `--output=` and drops the header would turn it into the same conflation silently.
+
+**Not verified here:** this host runs util-linux 2.42.3, where `--real` works, so the first
+branch always wins. What is verified is that the fallback's flag form produces the same
+four columns on this host. **FT-014** asks for the real answer on a RHEL/CentOS 7 box —
+whether `findmnt -t no...` populates the table there — which is the one thing no stub
+settles, since a stub proves only that our own fallback ran.
+
+### R2-009 — the megaraid probe finds nothing when drive IDs start above 9 — accepted, done
+
+Provenance: Claude Opus 5's `F-013`, MEDIUM.
+
+**Total loss of a healthy array, and the report asserted the opposite.** `misses` started at
+0 and was armed from the first iteration, so the walk gave up at `n=9` when no ID below 10
+had answered. The section then printed "_No drives answered `-d megaraid,N`. The controller
+may be in HBA/IT mode..._" on a host whose array was right there, and exited 0.
+
+**Reproduced here, and it matches the reviewer's table row for row.** A stub `smartctl`
+answering only at chosen device IDs, over T6's existing `lsblk` and `lspci` fixtures, with
+`is_root` forced true:
+
+| Lowest device ID that answers | Drive rows emitted |
+|---|---|
+| 0, 1, 2, 3 | 4 |
+| 9, 10, 11 | 3 |
+| 10, 11, 12 | **0** |
+| 12, 13, 14, 15 | **0** |
+
+**This supersedes an adjudicated verdict, and says so.** The `G, edge cases` row accepted
+"megaraid probe can skip drives at sparse IDs beyond the 10-miss threshold" as a documented
+tradeoff against a 32-iteration worst case. That verdict was about **partial** loss — some
+drives missing from a table that still appears. The measurement above is total loss plus a
+printed sentence asserting the array is empty, which is a wrong answer rather than a missing
+one: the same distinction that made C-016 a defect rather than a limitation. The sparse-ID
+tradeoff still stands past the first hit and is unchanged.
+
+**The fix is one condition, not the reviewer's.** The miss counter is armed only after the
+first hit. Before that, the walk now covers the whole declared `{0..31}` range rather than
+stopping at an index bound — the reviewer's own `[ "$hits" -eq 0 ] && [ "$n" -ge 12 ]` snippet
+breaks *before* probing ID 12 and so still finds nothing in the base-12 row of their own
+table. Walking the full range is affordable because a miss on an absent ID returns
+immediately; `MEGARAID_PROBE_S=90` is there for the pathological case where every call burns
+its full `tmo 6`, and a probe cut short by it **warns**, because drives past the cut are
+unknown.
+
+**The check.** T21 is T6's fixture with the answers moved to IDs 12-15 — that is the entire
+difference, and T6 could not have caught this because all four of its IDs are below the
+threshold. It simulates `is_root` against a copy rather than requiring root, so unlike T6's
+probe half it runs on every host instead of only under `sudo` and CI's root pass. Mutation:
+re-arm the counter from `n=0` and five assertions fail.
+
+**Not verified here:** no controller in reach, so how often a controller numbers from 10 or
+higher is unknown, and it is the difference between MEDIUM and HIGH. **FT-015** asks for the
+one command that settles it.
+
+### R2-010 — no aggregate deadline — accepted with a narrower scope, done
+
+Provenance: Claude Opus 5's `F-004`, MEDIUM.
+
+Every call is bounded; the run was not. The reviewer's arithmetic for a Proxmox node with 12
+disks, 28 guests, ZFS and Docker sums the per-call budgets to **1,175s — about 20 minutes**,
+against a README that said "can take a minute".
+
+**This is not a hang**, and that matters for how it was fixed: every call returns, so the
+consequence is a cron job overrunning its window and a `tee` that looks frozen, not a report
+that never arrives.
+
+**Accepted as a bound on the variable part of the run, not as an aggregate deadline**, and
+the difference is deliberate. Only three regions scale with host size: the megaraid probe
+and the two guest loops, which are 630s of the 1,175s on their own. Those are bounded —
+`RUN_BUDGET_S=600` checked at the top of each guest loop, `MEGARAID_PROBE_S` on the probe —
+and each warns when it cuts. The remaining ~545s is a fixed number of calls, and a true
+deadline over it would have to abandon a half-written section, which trades a slow report
+for a malformed one. `SECONDS` is a bash builtin since 2.0, so nothing is executed and
+nothing is written to read it. `warn` is safe at all three sites: a `for` loop in the main
+shell is not a subshell.
+
+**Not verified here:** no host in reach is large enough to reach either bound, so the cut
+paths are reasoned rather than measured. The counters and warnings beside them are covered
+by T21 and T22.
+
+### R2-011 — a failing guest config drops the guest in silence — accepted, done
+
+Provenance: Claude Opus 5's `F-017`, MEDIUM.
+
+`[ -z "$CFG" ] && continue` dropped any guest whose `pct config` or `qm config` returned
+nothing, with no warning. **If every call fails the whole table disappears and the script
+still exits 0**, which a consumer reads as "this node has no containers" on a node full of
+them — and `pct list` had already named them, so the script knew better.
+
+This is the same shape as CI-001 and C-016: a section that goes silent where the honest
+answer is "unknown". The exit-code contract's rule applies directly — the tool was present,
+permitted, and returned nothing.
+
+**Counted and warned once per loop, not per guest.** Twenty-eight identical warnings would
+bury the block that exists to be read, and the count is the useful fact: "`pct config`
+returned nothing for 3 of the containers `pct list` named".
+
+**The check.** T22's second half stubs a `pct` whose `list` names three containers and whose
+every `config` fails — the worst shape of it. It asserts the warning by name and that it
+carries the count. Mutation: restore the silent `continue` and both fail.
 
 ---
 

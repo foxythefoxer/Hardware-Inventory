@@ -438,6 +438,56 @@ would replace a working code path on a guess.
   outright in that case by design — a host that cannot answer the question does
   not get the fallback — and the same two counts should still read `1` and `1`.
 
+### FT-014 — does the `findmnt` fallback populate the table on util-linux 2.23? (R2-008)
+
+- **Needs:** RHEL 7 or CentOS 7, or anything else shipping util-linux below 2.28.
+  `findmnt --version` says.
+- **Why not here:** this host runs util-linux 2.42.3, where `--real` works, so the
+  first branch always wins and the fallback is never reached on any run or in any
+  test. A stub can only prove that our own `if` fires — it cannot prove the older
+  binary accepts `-t no...` and returns the same four columns, which is the whole
+  question. The README's matrix lists RHEL as **Full** support and the script warned
+  it had no mounted filesystems.
+- **Run:**
+  ```bash
+  findmnt --version                                       # precondition: below 2.28?
+  findmnt --real -o TARGET,SOURCE,FSTYPE,OPTIONS | wc -l  # expected: 0, and an error
+  findmnt -t nosquashfs,notmpfs,nodevtmpfs,nooverlay -o TARGET,SOURCE,FSTYPE,OPTIONS | wc -l
+  ```
+  If the first line reports 2.28 or newer, stop — this host cannot answer it, and
+  both commands will simply work.
+- **Run as:** unprivileged. Neither form needs root.
+- **Send back:** the version and the two counts. `0` then a number above 1 is the
+  pass and confirms both halves — that `--real` really is what failed, and that the
+  fallback really does recover the table. Two non-zero counts mean `--real` works
+  there after all and the finding's premise is wrong on this distribution, which is
+  worth knowing and needs no report. **No report, and no mount table** — the counts
+  are the answer; a mount table is estate topology.
+
+### FT-015 — what device ID does a real controller number its drives from? (R2-009)
+
+- **Needs:** any host with a hardware RAID controller and its vendor CLI —
+  `perccli64` or `storcli64`. The same host class as FT-011.
+- **Why not here:** no controller in reach, so the fix is measured against a stub
+  that answers wherever it is told to. The stub proves the probe *can* find drives
+  based at 12; it says nothing about whether any controller actually numbers them
+  that way. **This is the difference between MEDIUM and HIGH**, and it is the one
+  thing that would change the rating rather than the fix.
+- **Run:**
+  ```bash
+  perccli64 /call/eall/sall show nolog 2>/dev/null | grep -i DID | head -20
+  # or, on Broadcom:
+  storcli64 /call/eall/sall show nolog 2>/dev/null | grep -i DID | head -20
+  ```
+- **Run as:** root. The vendor CLI needs it.
+- **Send back:** **the lowest DID only** — one number. Nothing else from that output
+  is wanted and most of it is estate identity: the listing carries enclosure IDs,
+  slot numbers and drive serials. If the lowest is 0 through 9, the old bound was
+  finding drives on this controller and the finding stays MEDIUM. If it is 10 or
+  higher, this array was invisible before v11 and the finding was HIGH.
+- **Worth pairing with FT-011**, which needs the same binary on the same host and
+  asks for one directory listing.
+
 ### FT-007 — the root half, on hardware that has any (standing)
 
 - **Needs:** any host you can `sudo` on, and ideally one with a BMC, a

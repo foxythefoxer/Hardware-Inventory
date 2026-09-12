@@ -32,15 +32,13 @@ That is not "nothing left to do", and the difference matters more now than it di
 when this list was full. Three bodies of work sit outside this file by design,
 and an empty **Remaining** is exactly when they get forgotten:
 
-- **Code review round two is adjudicated down to its CRITICAL and all three
-  HIGHs.** `R2-001` through `R2-004` are done; the other **23 of 27 findings
-  have never been through `/adjudicate`** and therefore cannot appear here,
-  accepted or rejected. Two that were re-checked against the file on 2026-09-12
-  are still live: F-009 (BusyBox `free -h` warns falsely on a host whose
-  `/proc/meminfo` is readable) and F-014 (`paste -sd', '` cycles its delimiters,
-  so three items join as `a,b c`). The documents are in [`reviews/`](reviews/);
-  the count line is at the head of the `R2-` section in
-  [`DISPOSITIONS.md`](DISPOSITIONS.md).
+- **Code review round two is adjudicated down to MEDIUM.** `R2-001` through
+  `R2-011` are done — the CRITICAL, all three HIGHs and all seven MEDIUMs. The
+  remaining **16 of 27 findings have never been through `/adjudicate`**: the 11
+  LOW and 5 NITPICK. They cannot appear here, accepted or rejected, until they
+  do. The documents are in [`reviews/`](reviews/); the count line is at the head
+  of the `R2-` section in [`DISPOSITIONS.md`](DISPOSITIONS.md), and the review's
+  own prioritized action list names all 16 with a one-line fix each.
 - [`PRIOR-ART.md`](PRIOR-ART.md) holds leads that have never been adjudicated
   either.
 - Open entries in [`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is
@@ -83,6 +81,21 @@ Verified against the file and covered by `tests/run.sh` where testable.
   its `## <hostname>` heading replaced with the fixed `## Hardware inventory`, so a
   consumer pasting the report into a hand-written document has a heading-level-agnostic
   boundary and no longer a title that collides with the document's own. Issue #5. v10.
+- **R2-005 … R2-011** — all seven R2 MEDIUMs, v11. `fld()`'s key anchored, so a
+  future `lsblk` column that merely ends with an existing key can no longer make
+  the device table name the wrong device (T6's fixture grew `KNAME`, and its
+  existing row assertion catches it). `free -h` falls back to `/proc/meminfo`,
+  so BusyBox rejecting a flag is no longer reported as a broken collector.
+  `paste -sd` replaced by `joinby` at eight sites — it cycles delimiters, so
+  three items joined as `a,b c`, **and two items silently used only the first
+  delimiter**, which the review had cleared as safe. `findmnt --real` falls back
+  for util-linux below 2.28 (**FT-014**). The megaraid probe arms its miss
+  counter only after the first hit — a controller numbering drives from 10 lost
+  its entire array *and the report said so* (**FT-015**). The two guest loops
+  and the probe are bounded by `RUN_BUDGET_S` / `MEGARAID_PROBE_S`, and warn
+  when they cut. A failing `pct`/`qm config` is counted and warned once instead
+  of dropping guests in silence. T21 and T22 are new; all five fixes with
+  behaviour changes were mutation-verified.
 - **R2-003** — all 24 `"${TMO[@]}"` expansions changed to the empty-array-safe
   `${TMO[@]+"${TMO[@]}"}`. Below bash 4.4 the bare form is an unbound variable
   under `set -u` when the array is empty — which is precisely the host with no
