@@ -29,11 +29,28 @@ verdict in [`DISPOSITIONS.md`](DISPOSITIONS.md) is now either implemented, below
 or rejected.
 
 That is not "nothing left to do", and the difference matters more now than it did
-when this list was full. [`PRIOR-ART.md`](PRIOR-ART.md) holds leads that have
-**never been adjudicated**, and open entries in
-[`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is still waiting on from
-host classes this machine is not — FT-013 is FR-004's own, and an LXC answering
-it `0` reopens FR-004 as a defect.
+when this list was full. Three bodies of work sit outside this file by design,
+and an empty **Remaining** is exactly when they get forgotten:
+
+- **Code review round two is adjudicated down to its CRITICAL and one HIGH only.**
+  `R2-001` and `R2-002` are done; the other **25 of 27 findings have never been
+  through `/adjudicate`** and therefore cannot appear here, accepted or rejected.
+  Four were re-checked against the file on 2026-09-12 and are still live: F-003
+  (`pveversion` unwrapped against a FUSE mount, while the same binary is wrapped
+  120 lines below), F-007 (`"${TMO[@]}"` under `set -u` below bash 4.4), F-009
+  (BusyBox `free -h`), F-014 (`paste -sd', '` cycling its delimiters). The
+  documents are in [`reviews/`](reviews/); the count line is at the head of the
+  `R2-` section in [`DISPOSITIONS.md`](DISPOSITIONS.md).
+- [`PRIOR-ART.md`](PRIOR-ART.md) holds leads that have never been adjudicated
+  either.
+- Open entries in [`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is
+  still waiting on from host classes this machine is not — FT-013 is FR-004's
+  own, and an LXC answering it `0` reopens FR-004 as a defect.
+
+**An unadjudicated review round rots the same way this queue does, and has less
+holding it up** — a queue item is at least visible in one line here, while a
+finding nobody ruled on is 150,000 bytes into a document whose own README says
+not to act on it without reading the ledger first.
 
 **Read the ledger entry before implementing any accepted FR.** For an
 accepted-with-changes item the conditions **are** the acceptance, and a summary
