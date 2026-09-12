@@ -24,44 +24,25 @@ consider"; it means nothing left that has been agreed to.
 
 ## Remaining
 
-- **FR-004** — fill manufacturer/model/motherboard/BIOS from
-  `/sys/devices/virtual/dmi/id/` when `dmidecode` is absent or unprivileged;
-  those files are world-readable while serials are not. Today an unprivileged run
-  emits `model: null` with the value sitting in a readable file. Accepted with
-  binding conditions.
+**Nothing.** FR-004 went in on 2026-09-12 and was the last accepted item; every
+verdict in [`DISPOSITIONS.md`](DISPOSITIONS.md) is now either implemented, below,
+or rejected.
 
-**FR-004 is the only item left, and as of 2026-09-09 nothing blocks it but
-effort.** FT-006 is answered on both halves and is closed: the whitebox-desktop
-half on this machine on 2026-09-07 (`0444` on the four fields, `0400` on the
-serials), the unprivileged-LXC half from the estate on 2026-09-09.
+That is not "nothing left to do", and the difference matters more now than it did
+when this list was full. [`PRIOR-ART.md`](PRIOR-ART.md) holds leads that have
+**never been adjudicated**, and open entries in
+[`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is still waiting on from
+host classes this machine is not — FT-013 is FR-004's own, and an LXC answering
+it `0` reopens FR-004 as a defect.
 
-**The LXC answer makes the container gate mandatory rather than precautionary,
-so implement that condition first.** `/sys/devices/virtual/dmi/id/` **exists and
-is populated inside an unprivileged LXC**, and `dmidecode` fails there — so a
-container is precisely where the fallback would fire, and precisely where it must
-not, or every container on a Proxmox node reports the node's motherboard as its
-own in the machine-readable `model:` field. The condition was written
-**unverified** for want of a container; it is now verified in the direction that
-makes it load-bearing. Gate on `systemd-detect-virt -c`, not on
-`PLATFORM != bare-metal` — a real VM's SMBIOS identity is legitimate inventory.
-
-Two of FR-004's conditions remain unverified and neither is a blocker: the
-placeholder-string filter (`To Be Filled By O.E.M.` and friends — this board
-fills its DMI properly), and whether a container sees the host's DMI *values* or
-synthetic ones, which cannot change the verdict because the gate skips both.
-Everything else accepted has been implemented — v7, below.
-
-**Read the ledger entry before implementing any of these FRs.** FR-004 is the
-one left; the note below applies to it, and applied to FR-001 and FR-002 when
-they were still here. For an
-accepted-with-changes item the conditions **are** the acceptance, and the summary
-line above is deliberately not a substitute for them — an index line that
+**Read the ledger entry before implementing any accepted FR.** For an
+accepted-with-changes item the conditions **are** the acceptance, and a summary
+line here is deliberately not a substitute for them — an index line that
 enumerates a condition set is the long form in miniature and drifts exactly as
 the long form does, which is why these lines do not try. Each was written against
-a real host, and FR-004 marks the conditions that could not be verified here;
-confirm those on a Proxmox LXC and a whitebox board rather than shipping them on
-reasoning alone — **FT-006**, and it wants answering *before* the implementation,
-not after.
+a real host; where a condition could not be verified here, the entry marks it and
+it wants answering on the right host class *before* the implementation, not
+after.
 
 ---
 
@@ -69,6 +50,18 @@ not after.
 
 Verified against the file and covered by `tests/run.sh` where testable.
 
+- **FR-004** — manufacturer, model, motherboard and BIOS filled from
+  `/sys/devices/virtual/dmi/id/` when `dmidecode` is absent or unprivileged, so
+  `model:` is no longer null on every unprivileged run with the value sitting in
+  a `0444` file. Serials are not: they are `0400`, and the **Service tag /
+  serial** row says it needs root rather than showing an em dash a reader would
+  take for "this host has none". **Skipped inside containers** — an LXC sees the
+  host's DMI, and FT-006 proved that gate load-bearing rather than
+  precautionary — and skipped where `systemd-detect-virt` is absent, since the
+  question cannot be answered there. Placeholder strings
+  (`To Be Filled By O.E.M.` and friends) read as unknown. T19 holds every
+  condition, all three host shapes. **FT-013** wants the gate confirmed against a
+  real LXC rather than a stubbed `systemd-detect-virt`. v10.
 - **FR-007** — the report wrapped in `<!-- hw-inventory:begin/end -->` comment fences and
   its `## <hostname>` heading replaced with the fixed `## Hardware inventory`, so a
   consumer pasting the report into a hand-written document has a heading-level-agnostic

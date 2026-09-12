@@ -408,6 +408,36 @@ would replace a working code path on a guess.
   `upower` is *present*. Caught by the operator running it; a host class this repo cannot
   reach is exactly where an ambiguous instruction becomes a false record.
 
+### FT-013 — does the shipped container gate actually hold in an LXC? (FR-004)
+
+- **Needs:** an unprivileged Proxmox LXC. The same host class that answered
+  FT-006.
+- **Why not here:** this machine is never a container, so the gate is exercised
+  only against a stubbed `systemd-detect-virt` (T19). The stub proves the branch
+  is wired to the right answer; it cannot prove the real tool gives that answer
+  under an unprivileged LXC's PID namespace. FT-006 established the *conditions*
+  that make the gate necessary — populated DMI, failing `dmidecode` — and this
+  asks the one thing left: that the shipped code skips.
+- **Run:**
+  ```bash
+  systemd-detect-virt -c; echo "detect-virt -c exit=$?"   # precondition
+  bash hw-inventory.sh > "$HOME/hw.md"
+  grep -c '^model: null' "$HOME/hw.md"
+  grep -c '^| Manufacturer / model | (needs root' "$HOME/hw.md"
+  ```
+  If the first line does not print a container type and exit `0`, stop — the
+  gate cannot be tested on a host whose own tooling says it is not a container,
+  and the answer would be about `systemd-detect-virt`, not about this script.
+- **Run as:** unprivileged. Root inside an unprivileged LXC is the same case for
+  this purpose (`dmidecode` fails there either way), so one run settles it.
+- **Send back:** the two counts — `1` and `1` is the pass. A `0` on either means
+  the container filled in the Proxmox node's identity as its own, which is the
+  defect this gate exists to prevent and is worth an immediate `/adjudicate`.
+- **Also worth one line, if the LXC has no `systemd-detect-virt` at all:**
+  `command -v systemd-detect-virt || echo absent`. The fallback is skipped
+  outright in that case by design — a host that cannot answer the question does
+  not get the fallback — and the same two counts should still read `1` and `1`.
+
 ### FT-007 — the root half, on hardware that has any (standing)
 
 - **Needs:** any host you can `sudo` on, and ideally one with a BMC, a

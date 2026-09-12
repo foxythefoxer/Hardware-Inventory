@@ -210,6 +210,23 @@ dmi() {
 
 is_root() { [ "$EUID" -eq 0 ]; }
 
+# One freely-readable DMI attribute, trimmed the same way dmi() trims its own
+# output so the two paths yield comparable values (FR-004). Measured 0444 on the
+# four fields this is called for and 0400 on product_serial / board_serial /
+# product_uuid — so this fills identity and can never fill a serial.
+dmi_sysfs() {
+  local f=/sys/devices/virtual/dmi/id/$1 v=""
+  [ -r "$f" ] && v=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$f" 2>/dev/null)
+  # Whitebox boards ship these verbatim and `dmidecode -s` returns them verbatim
+  # too. An unfilled field must read as unknown rather than as a model name —
+  # this value goes into the machine-readable `model:` frontmatter field.
+  case $v in
+    'To Be Filled By O.E.M.'|'Default string'|'System Product Name'|\
+    'System manufacturer'|'Not Specified'|'None'|'Unknown') v="" ;;
+  esac
+  printf '%s\n' "$v"
+}
+
 # =========================================================== gather first ===
 # Frontmatter needs these before anything is printed.
 
@@ -263,6 +280,30 @@ MFR=$(dmi system-manufacturer)
 SERIAL=$(dmi system-serial-number)
 BOARD=$(dmi baseboard-product-name)
 BIOS=$(dmi bios-version)
+
+# FR-004. dmidecode absent, or present and unprivileged, leaves all five empty
+# while four of them sit in world-readable sysfs files — an unprivileged run
+# emitted `model: null` with the value on disk. Serials are deliberately not
+# filled here; they are 0400 and the identity table says so rather than printing
+# an em dash that would read as "this host has no serial".
+#
+# NOT inside a container. An unprivileged LXC has a populated
+# /sys/devices/virtual/dmi/id and a failing dmidecode (FT-006) — precisely where
+# this would fire and precisely where it must not, or every container on a
+# Proxmox node reports the node's motherboard as its own. Gated on the container
+# case alone, not on PLATFORM: a real VM's SMBIOS identity is its own and is
+# legitimate inventory. A host with no systemd-detect-virt cannot answer the
+# question and so does not get the fallback either — a null `model:` on a
+# non-systemd host is the cheaper error than a wrong one on every container.
+DMI_SYSFS=""
+if [ -z "$PROD$MFR$BOARD$BIOS" ] && have systemd-detect-virt \
+   && ! "${TMO[@]}" systemd-detect-virt -q -c 2>/dev/null; then
+  PROD=$(dmi_sysfs product_name)
+  MFR=$(dmi_sysfs sys_vendor)
+  BOARD=$(dmi_sysfs board_name)
+  BIOS=$(dmi_sysfs bios_version)
+  [ -n "$PROD$MFR$BOARD$BIOS" ] && DMI_SYSFS=1
+fi
 
 # Disks, used by the device table, the SMART table and the megaraid probe.
 # One lsblk for all three (A-007). The -P (key="value") form is used
@@ -325,6 +366,11 @@ if have pveversion; then
   kv "Proxmox VE" "$(pveversion 2>/dev/null | head -1)"
 fi
 
+# Three states, not two (FR-004): full identity from dmidecode, partial identity
+# from DMI sysfs with the serials still missing, and nothing. The partial state
+# must never print both the values and the "(needs root)" row as though it had
+# neither.
+DMIROOT="(needs root — install/run dmidecode as root)"
 if is_root && have dmidecode; then
   kv "Manufacturer" "${MFR:-$NA}"
   kv "Model" "${PROD:-$NA}"
@@ -334,8 +380,14 @@ if is_root && have dmidecode; then
   if [ -z "$PROD" ] && [ -z "$MFR" ] && [ -z "$SERIAL" ] && [ -z "$BOARD" ]; then
     warn '`dmidecode` returned no system identity as root — manufacturer, model, service tag and motherboard are all unknown.'
   fi
+elif [ -n "$DMI_SYSFS" ]; then
+  kv "Manufacturer" "${MFR:-$NA}"
+  kv "Model" "${PROD:-$NA}"
+  kv "Service tag / serial" "$DMIROOT"
+  kv "Motherboard" "${BOARD:-$NA}"
+  kv "BIOS" "${BIOS:-$NA}"
 else
-  kv "Manufacturer / model" "(needs root — install/run dmidecode as root)"
+  kv "Manufacturer / model" "$DMIROOT"
 fi
 echo
 

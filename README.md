@@ -135,7 +135,10 @@ sudo bash hw-inventory.sh | tee "$(hostname)-$(date +%F).md"
 Run with `bash`, not `./`, so the shebang and your login shell can't disagree.
 
 **Run as root.** Without it, `dmidecode` and SMART return nothing and the report is
-marked `**not run as root**, some fields incomplete` in its header.
+marked `**not run as root**, some fields incomplete` in its header. An unprivileged run
+still fills manufacturer, model, motherboard and BIOS from the world-readable DMI
+attributes in `/sys` — but **not** the service tag, which is root-only, and not inside a
+container, which would otherwise report its host's motherboard as its own.
 
 Three things that catch people out:
 

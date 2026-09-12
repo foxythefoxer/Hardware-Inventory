@@ -272,7 +272,7 @@ the same `VX2768-2KP` panel, and `Battery`/`PowerAdapter` read the
 `/sys/class/power_supply` that FR-002 **verified** is empty on the host the UPS is
 actually attached to.
 
-### FR-004 — unprivileged system identity from DMI sysfs — accepted with changes
+### FR-004 — unprivileged system identity from DMI sysfs — accepted with changes, done
 
 The genuine gap FR-003 surfaced, reachable without the dependency that sank it. An
 unprivileged run currently prints `| Manufacturer / model | (needs root — install/run
@@ -320,6 +320,43 @@ DMI identity is the outlier that has no fallback. Conditions:
   there are now three states rather than two: full identity, partial identity from
   sysfs, and nothing. Do not let the partial state print the "(needs root)" row *and*
   the values.
+
+**Implemented under v10, 2026-09-12.** One `dmi_sysfs()` beside the existing `dmi()`,
+trimming its value the same way so the two paths are comparable, and one gate in the
+gather stage that fires only when all four dmidecode fields came back empty. Every
+condition above is held by a T19 assertion. Measured on this whitebox AM5 desktop,
+unprivileged: the report is byte-identical to `v10` except for the identity rows —
+`model:` goes from `null` to the product name, and the one combined *(needs root)* row
+becomes Manufacturer / Model / Motherboard / BIOS plus a **Service tag / serial** row
+that still reads *(needs root)* rather than an em dash.
+
+Three decisions the conditions left open, and what settles each:
+
+- **A host with no `systemd-detect-virt` does not get the fallback either.** The gate
+  needs a *positive* "not a container" answer, and the question is unanswerable without
+  the tool — a non-systemd LXC is a real host class (Alpine on Proxmox), and it is the
+  same class the gate exists for. The cost is a null `model:` on a non-systemd bare-metal
+  host, which is exactly today's behaviour; the alternative cost is a wrong `model:` on
+  every container of that class. Asymmetric, so the conservative branch wins. `-c` is
+  called separately rather than matching `PLATFORM` against a list of container types —
+  the list is the thing the condition told us not to write.
+- **The placeholder filter runs on both paths' values**, not just the sysfs one, because
+  it sits in `dmi_sysfs()` and the root path never reaches it. That is deliberate and
+  narrow: the root path's exposure to `To Be Filled By O.E.M.` is unchanged and was
+  adjudicated as out of scope above. Widening it would change what a *root* run reports
+  on whitebox boards, which is not what was accepted.
+- **A root run whose `dmidecode` returns nothing now recovers the four fields from sysfs
+  and no longer warns.** The fallback condition cannot tell that case apart from an
+  unprivileged one, and the existing warning text — "manufacturer, model, service tag and
+  motherboard are **all** unknown" — would be false once three of them are filled. The
+  serial row is still an em dash there, which is the root path's existing and honest
+  answer: the permitted tool ran and gave nothing.
+
+Both bugs the conditions predict were reintroduced against the finished code and the
+suite caught each: deleting the container gate turns the four container assertions red,
+and cutting the placeholder list turns two red. Suite **176/0**, baseline 161/0.
+ShellCheck and the root pass are CI's; this host has neither. **Unverified here**: the
+gate against a real LXC rather than a stubbed `systemd-detect-virt` — **FT-013**.
 
 ### FR-005 — CRLF from the Unraid flash device breaks the Shares table — accepted, done
 

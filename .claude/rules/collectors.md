@@ -247,7 +247,13 @@ What the suite covers, and why each case is shaped the way it is:
    test's own claim **by name, scoped to the warnings block**, the way T12, T15,
    T16 and T17 do. A *controlled* exit code needs the whole `PATH` built, as
    T8's `minbin` does. This class outlived CI-001, which fixed one cause of it.
-10. `bash -n` (T1) and ShellCheck (T7). T1 also greps the script for banned verbs
+10. **T19 the DMI sysfs fallback.** All three host shapes, because the feature is
+   a fallback that must fire in exactly one of them: no `dmidecode` on bare metal
+   (fill), the same host inside a container (do not — it is the node's board),
+   and no `systemd-detect-virt` at all (cannot tell, so do not). Its `PATH` is
+   T8's `minbin`, which is what makes the assertions hold under CI's root pass on
+   a runner that has `dmidecode` installed.
+11. `bash -n` (T1) and ShellCheck (T7). T1 also greps the script for banned verbs
    and for `set -e`/`pipefail`, stripping comments and quoted strings first — the
    header comment deliberately names every verb the script does not use.
 

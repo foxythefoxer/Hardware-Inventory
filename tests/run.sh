@@ -946,6 +946,85 @@ grep -qF 'Distro $(echo SOURCED)' "$TMP/osr.md" \
 grep -q '^os_id: "fixtureos"' "$TMP/osr.md" \
   && ok "ID read, ID_LIKE and VERSION_ID not mistaken for it" || bad "os_id wrong"
 
+# ------------------------------------------------------------- T19 DMI sysfs --
+# FR-004. The whole feature is a fallback that must fire in exactly one of three
+# host shapes, so all three are run: no dmidecode on bare metal (fill), the same
+# host inside a container (do not fill — it would be the Proxmox node's board),
+# and no systemd-detect-virt at all (cannot tell, so do not fill).
+#
+# dmidecode is absent from every run here because the PATH is minbin, which
+# makes these assertions hold under the root pass too — CI runs the suite twice
+# and the root pass would otherwise take the dmidecode branch on any runner that
+# has it.
+head_ "T19  Unprivileged system identity from DMI sysfs"
+
+sed -e "s#/sys/devices/virtual/dmi/id#$FIX/dmi#g" "$SCRIPT" > "$TMP/dmi.sh"
+mkdir -p "$TMP/dmibare" "$TMP/dmilxc"
+printf '#!/bin/sh\n[ "$1" = -q ] && exit 1\necho none\nexit 1\n' > "$TMP/dmibare/systemd-detect-virt"
+printf '#!/bin/sh\n[ "$1" = -q ] && exit 0\necho lxc\nexit 0\n' > "$TMP/dmilxc/systemd-detect-virt"
+chmod +x "$TMP/dmibare/systemd-detect-virt" "$TMP/dmilxc/systemd-detect-virt"
+
+PATH="$TMP/dmibare:$TMP/minbin" bash "$TMP/dmi.sh" > "$TMP/dmi.md" 2>"$TMP/dmi.err"
+
+[ ! -s "$TMP/dmi.err" ] && ok "stderr empty" || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/dmi.err"; }
+# Same reasoning as T15/T16: the warnings block, never the exit code — with this
+# PATH almost every collector on the host is absent and that is not this test's
+# business. Absent DMI is a normal container, so this path must never warn.
+sed -n '/^## Collection warnings/,$p' "$TMP/dmi.md" | grep -qiE 'dmi|identity|sysfs' \
+  && bad "the DMI sysfs fallback produced a warning" || ok "DMI sysfs fallback never warns"
+grep -q '^| Model | FIXTURE-MODEL-9000 |' "$TMP/dmi.md" \
+  && ok "model filled from sysfs with no dmidecode" || bad "model row not filled from sysfs"
+grep -q '^| Manufacturer | FIXTURE Systems Ltd. |' "$TMP/dmi.md" \
+  && ok "manufacturer filled from sysfs" || bad "manufacturer row not filled from sysfs"
+# The point of the feature, and the one field a consumer reads by machine: this
+# was `model: null` on every unprivileged run with the value sitting in a 0444
+# file. A table row alone would pass while the frontmatter stayed null.
+grep -q '^model: "FIXTURE-MODEL-9000"$' "$TMP/dmi.md" \
+  && ok "frontmatter model: filled, not null" || bad "frontmatter model: still null"
+# Trimmed like dmidecode's own output — the fixture pads bios_version with
+# spaces on both sides, which a raw read carries into the cell.
+grep -q '^| BIOS | F.99 |' "$TMP/dmi.md" \
+  && ok "value trimmed the way dmi() trims" || bad "leading/trailing whitespace not trimmed"
+# Placeholder filter: the fixture's board_name is the commonest of them. An
+# unfilled field must read as unknown, not as a motherboard called "To Be
+# Filled By O.E.M." — and the row must still be there, as the em dash.
+grep -q 'To Be Filled' "$TMP/dmi.md" \
+  && bad "a DMI placeholder string was reported as a real value" || ok "placeholder string filtered out"
+grep -q '^| Motherboard | — |' "$TMP/dmi.md" \
+  && ok "filtered field still renders its row" || bad "filtered field dropped its row"
+# The serials are 0400 and there is no product_serial in the fixture at all, so
+# this asserts both that nothing invents one and that the row says why it is
+# missing. An em dash here would read as "this host has no serial".
+grep -q '^| Service tag / serial | (needs root' "$TMP/dmi.md" \
+  && ok "serial row still says it needs root" || bad "serial row lost its needs-root note"
+grep -q '^| Service tag / serial | — |' "$TMP/dmi.md" \
+  && bad "serial silently became an em dash as though the host had none" || ok "serial not faked"
+# Three states, not two: the partial state must not print the combined
+# "(needs root)" row underneath the values it just filled in.
+grep -q '^| Manufacturer / model | (needs root' "$TMP/dmi.md" \
+  && bad "partial identity printed the needs-root row AND the values" \
+  || ok "needs-root row replaced, not duplicated"
+
+# The container case, which FT-006 turned from precautionary into mandatory: an
+# unprivileged LXC has this tree populated with the HOST's values and a failing
+# dmidecode, so the fallback fires exactly where it is wrong. Nothing about the
+# fixture changes between the two runs except the virt answer.
+PATH="$TMP/dmilxc:$TMP/minbin" bash "$TMP/dmi.sh" > "$TMP/dmilxc.md" 2>/dev/null
+grep -q 'FIXTURE-MODEL-9000' "$TMP/dmilxc.md" \
+  && bad "container read the host's DMI — every LXC would report the node's board" \
+  || ok "fallback skipped inside a container"
+grep -q '^| Manufacturer / model | (needs root' "$TMP/dmilxc.md" \
+  && ok "container falls back to the needs-root row" || bad "container lost the needs-root row"
+grep -q '^model: null' "$TMP/dmilxc.md" \
+  && ok "container frontmatter model: stays null" || bad "container wrote a model: it does not own"
+
+# No systemd-detect-virt: the question cannot be answered, so the fallback must
+# not fire. minbin alone has neither it nor dmidecode.
+PATH="$TMP/minbin" bash "$TMP/dmi.sh" > "$TMP/dmiblind.md" 2>/dev/null
+grep -q 'FIXTURE-MODEL-9000' "$TMP/dmiblind.md" \
+  && bad "filled DMI with no way to tell a container from bare metal" \
+  || ok "no systemd-detect-virt, no fallback"
+
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
