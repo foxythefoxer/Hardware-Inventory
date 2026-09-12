@@ -203,9 +203,32 @@ Docker · Failed systemd units · Collection warnings (only when something faile
 
 ### Version
 
-`collector:` is the version a vault files the report under, and it is the only
-place the version appears in the output. **It moves when the emitted report
-changes for some class of host, and only once per state the world has seen.**
+`collector:` is the version a vault files the report under; since FR-007 the
+opening comment fence carries it too, as `collector=hw-inventory.sh/v10` — the
+copy a parser reads before it has parsed anything. **It moves when the emitted
+report changes for some class of host, and only once per state the world has
+seen.**
+
+**So mint on the re-fetch, not on the merge.** A number is cut when there is a
+reason to tell the estate to pull, and everything landed since ships under it
+together. Between cuts the header carries the number the open batch *will* ship
+as, so `main` is that number unreleased and `git describe --tags` is what
+separates a release from the road to one. A commit that alters the report is not
+by itself a reason to cut — v8 and v9 below are what happens when it is treated
+as one.
+
+**v8 and v9 are the drift this rule exists to prevent, left standing rather than
+rewritten.** v8 was R2-001 — `nolog` on the three RAID-CLI calls, so a `show`
+verb stops writing `storcli.log` into the working directory — and v9 was R2-002,
+the UPower probe gated on a daemon already running. Both are real fixes to the
+read-only guarantee and both deserved to ship. But **neither changed the emitted
+report on any host that had been run**: no estate host has a RAID CLI installed
+at all (FT-011), and the UPower gate stops a daemon being activated rather than
+altering a section. Two numbers for two states nothing ever filed a report under
+is the noise v5's paragraph below argues against — three versions later, against
+the same rule. The tags stay, because a tag never moves and that includes one
+that should not have been cut; the rule they broke is now written above as a
+trigger instead of left implied.
 
 **v7** is FR-005, the first defect a real Unraid host found rather than a review:
 `/boot` is the FAT32 flash device, so its `.cfg` files are CRLF, and the CR rode
@@ -230,16 +253,19 @@ nothing ever ran is noise in every vault that files by this field. v5 was
 tagged and fetchable before this batch, so this one is v6.
 
 What changed in each version is the *Done* list in
-[`docs/QUEUE.md`](docs/QUEUE.md). The version is written twice in the script —
-the header comment and that `printf` — and T1 fails if the two ever disagree,
-which is how a stale `collector:` misfiling every report gets caught.
+[`docs/QUEUE.md`](docs/QUEUE.md). The version is written three times in the script —
+the header comment, that `printf`, and the opening fence — and T1 fails unless
+all three agree, which is how a stale `collector:` misfiling every report gets
+caught. T1 matches the sites by pattern rather than by name, so a fourth is
+covered the day it is added and a deleted one fails on the count.
 
-**Every version is also a git tag, and a tag never moves.** `v7` points at the
-commit that minted it and keeps pointing there after `main` has moved on. A
-change that alters the report earns `v8` and its own tag, never a re-cut `v7` —
-a host that already fetched would go on running the old one and say `v7` either
-way. Docs, tests and hooks change under a tag without minting one; the collector
-is what the tag is for.
+**Every released version is also a git tag, and a tag never moves.** `v7` points
+at the commit that minted it and keeps pointing there after `main` has moved on.
+A *release* earns `v8` and its own tag, never a re-cut `v7` — a host that already
+fetched would go on running the old one and say `v7` either way. Docs, tests and
+hooks change under a tag without minting one; the collector is what the tag is
+for. A header naming a number with no tag behind it is an open batch, which is
+why the two commands below are the pre-flight and not a formality.
 
 Pin a sweep so a month of reports cannot straddle a bump:
 

@@ -119,17 +119,24 @@ else
   ok "set -e and pipefail correctly absent"
 fi
 
-# The version is written twice: the header comment, and the `collector:`
-# frontmatter field a vault files the report under. A code review flagged that
-# pair as undetectably driftable — a stale `collector:` misfiles every report
-# and nothing else in the suite reads it. Now one of them going stale is a
-# failing test, not an archaeology problem six months later.
-HDRV=$(sed -n 's/^# hw-inventory\.sh \(v[0-9][0-9]*\) .*/\1/p' "$SCRIPT")
-FMV=$(sed -n "s/^printf 'collector: hw-inventory\.sh \(v[0-9][0-9]*\).*/\1/p" "$SCRIPT")
-if [ -n "$HDRV" ] && [ "$HDRV" = "$FMV" ]; then
-  ok "version agrees in both places ($HDRV)"
+# The version is written three times: the header comment, the `collector:`
+# frontmatter field a vault files the report under, and the opening comment
+# fence a consumer's parser keys on. A code review flagged the first pair as
+# undetectably driftable — a stale `collector:` misfiles every report and
+# nothing else in the suite reads it. FR-007 then added the fence as a third
+# site and did not extend this check with it, which is the same hole reopened
+# on the one site a machine reads first.
+#
+# Matching every site by pattern rather than naming two of them means a fourth
+# is covered the day it is added; the count floor is what catches a site being
+# deleted rather than drifting.
+VERS=$(grep -o 'hw-inventory\.sh[ /]v[0-9][0-9]*' "$SCRIPT" | grep -o 'v[0-9][0-9]*')
+VERN=$(printf '%s\n' "$VERS" | grep -c .)
+VERU=$(printf '%s\n' "$VERS" | sort -u)
+if [ "$VERN" -ge 3 ] && [ "$(printf '%s\n' "$VERU" | grep -c .)" -eq 1 ]; then
+  ok "version agrees across all $VERN sites ($VERU)"
 else
-  bad "version mismatch: header '$HDRV', frontmatter '$FMV'"
+  bad "version sites disagree or went missing: $VERN found, values '$(printf '%s' "$VERU" | tr '\n' ' ')'"
 fi
 
 # ----------------------------------------------------------------- T2 clean --
