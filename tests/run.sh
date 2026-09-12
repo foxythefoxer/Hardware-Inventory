@@ -140,6 +140,13 @@ rc_agrees "$RC" "$TMP/clean.md"
 [ ! -s "$TMP/clean.err" ] && ok "stderr empty" || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/clean.err"; }
 grep -q 'End of report' "$TMP/clean.md" && ok "reaches footer" || bad "no footer"
 
+# FR-007: the report is wrapped in a heading-level-agnostic boundary so a
+# consumer pasting it into a hand-written document can find where it starts
+# and ends, and the drifting `## <hostname>` heading is a fixed string instead.
+head -1 "$TMP/clean.md" | grep -q '^<!-- hw-inventory:begin ' && ok "opens with the begin fence" || bad "missing begin fence"
+tail -2 "$TMP/clean.md" | grep -q '^<!-- hw-inventory:end -->$' && ok "closes with the end fence" || bad "missing end fence"
+grep -q '^## Hardware inventory$' "$TMP/clean.md" && ok "fixed section heading, not the hostname" || bad "heading still varies by host"
+
 # A table header with no rows under it means a section printed its shape but
 # collected nothing — the exact silent-empty failure the suite guards against.
 awk '/^\|---/{getline n; if (n !~ /^\|/) {print NR; exit}}' "$TMP/clean.md" | grep -q . \

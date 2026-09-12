@@ -415,6 +415,38 @@ the existing 105-container T11 fixture (triggers the new footnote) and T12's zer
 one (confirms no bare header). Not filed in `FIELD-TESTS.md` — nothing here is
 host-specific.
 
+### FR-007 — comment-fence the report and fix its heading — accepted, done
+
+Issue #5, filed by Tsune, the agent for foxythefoxer's private notes vault. Output shape
+only, no new source and no new read — the report's opening heading (`## <hostname>`) was a
+*value*, so it collided with a per-host document's own title when pasted in, and nothing
+marked where the generated block began or ended. `## Collection warnings` sits at the same
+H2 level as the old header, so no heading-based wrapper could bound the block either — the
+filer's own eight-report sample (Unraid, Proxmox bare metal, a Proxmox LXC, Debian, Ubuntu,
+Fedora, CachyOS) confirmed it fires on real hosts, not just the two shown in the issue.
+
+All three parts of the proposal, as filed:
+
+1. `<!-- hw-inventory:begin host=<hostname> collected=<iso8601> collector=hw-inventory.sh/v10 -->`
+   wraps the whole emitted report, frontmatter through footer, with a matching `<!--
+   hw-inventory:end -->`. Heading-level-agnostic by construction, so `## Collection
+   warnings` stops being a special case for any consumer bounding the block.
+2. `## Hardware inventory` (fixed string) replaces `## <hostname>`. The host name is
+   already in the frontmatter, both fence attributes, and the footer.
+3. The bare `> Collected …` line is now a `> [!note]` callout, same content.
+
+Version minted to v10 per the two-site convention T1 already checks (header comment,
+`collector:` frontmatter field); both updated together, so the version-agreement assertion
+still passes on the new number rather than merely on a match.
+
+Suite 161/0, baseline 158/0. Three new T2 assertions: begin fence is line 1, end fence is
+the last line, and the fixed heading is present — all confirmed to fail against the
+pre-fix script before the ledger entry was written (missing fence ×2, `## <hostname>`
+still present), the mutation-test control this file's testing rules ask for. No new host
+class needed: the emitted document has the same shape on every class, per the filer's own
+sample, and nothing here reads anything — verified by re-reading the diff against the
+read-only banned-verb list (T1), unchanged.
+
 ---
 
 ## Repository audits — `A-`

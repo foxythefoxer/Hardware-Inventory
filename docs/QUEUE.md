@@ -69,6 +69,10 @@ not after.
 
 Verified against the file and covered by `tests/run.sh` where testable.
 
+- **FR-007** — the report wrapped in `<!-- hw-inventory:begin/end -->` comment fences and
+  its `## <hostname>` heading replaced with the fixed `## Hardware inventory`, so a
+  consumer pasting the report into a hand-written document has a heading-level-agnostic
+  boundary and no longer a title that collides with the document's own. Issue #5. v10.
 - **R2-001** — `nolog` passed to the three `perccli`/`storcli` calls, which otherwise
   write `storcli.log` into the working directory: a `show` verb that writes, which is why
   no banned-verb list could see it. T1 greps for the keyword instead of a verb, and T13's

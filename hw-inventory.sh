@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hw-inventory.sh v9 — emit a Markdown block describing this host.
+# hw-inventory.sh v10 — emit a Markdown block describing this host.
 #
 # Read-only. Collects nothing off-box, writes nothing, sends nothing.
 # Every command is a query. Deliberately absent: smartctl -t (self-tests),
@@ -289,6 +289,8 @@ if have lsblk; then
 fi
 
 # ============================================================ frontmatter ===
+printf '<!-- hw-inventory:begin host=%s collected=%s collector=hw-inventory.sh/v10 -->\n\n' \
+  "$HOST" "$(date -Iseconds)"
 printf -- '---\n'
 yk host "$HOST"
 yk os "$OSNAME"
@@ -301,13 +303,13 @@ yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
 printf 'collected: %s\n' "$(date '+%Y-%m-%d')"
-printf 'collector: hw-inventory.sh v9\n'
+printf 'collector: hw-inventory.sh v10\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 
 # ---------------------------------------------------------------- header ----
-printf '## %s\n\n' "$HOST"
-printf '> Collected %s by `hw-inventory.sh`%s\n\n' \
+printf '## Hardware inventory\n\n'
+printf '> [!note] Collected %s by `hw-inventory.sh`%s\n\n' \
   "$(date '+%Y-%m-%d %H:%M %Z')" \
   "$(is_root || echo ' — **not run as root**, some fields incomplete')"
 
@@ -1220,7 +1222,8 @@ if [ "$WARNCOUNT" -gt 0 ]; then
   printf '_%d collector(s) affected. The script exits 1 when this section is present._\n\n' "$WARNCOUNT"
 fi
 
-printf -- '---\n*End of report for %s.*\n' "$HOST"
+printf -- '---\n*End of report for %s.*\n\n' "$HOST"
+printf '<!-- hw-inventory:end -->\n'
 
 # Exit non-zero so a caller that only checks $? still learns the report is
 # incomplete. The report itself is always written in full first.
