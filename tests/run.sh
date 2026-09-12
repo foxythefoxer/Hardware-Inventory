@@ -110,6 +110,32 @@ else
   ok "every RAID CLI call suppresses its log file"
 fi
 
+# R2-003. Below bash 4.4, `"${arr[@]}"` on an EMPTY array is an unbound
+# variable under `set -u` and the shell exits. TMO is empty on exactly the
+# hosts its `have timeout` fallback exists for, and two of its expansions are
+# in the main shell, where the abort truncates the report mid-file — no
+# warnings block, no footer, and an exit code a caller cannot tell from an
+# honest incomplete collection.
+#
+# Held by grep, not by execution, and that is a real limitation stated rather
+# than hidden: no bash in reach is older than 4.4, so a run cannot fail on it
+# here. T20 covers the other half — that the empty-TMO path still WORKS — on
+# any bash.
+#
+# Comments are stripped, like the banned-verb and pipefail checks above and for
+# the same reason: the TMO comment block deliberately NAMES the bare form to
+# say why it is not used, and this check failed on that comment before it
+# failed on any code. Quoted strings are NOT stripped — strip() would blank the
+# expansion itself. Then every safe expansion is deleted, so whatever
+# `${TMO[@]}` survives both passes is a genuine bare one.
+tmobare() { sed -e 's/#.*//' -e 's/\${TMO\[@\]+"\${TMO\[@\]}"}//g' "$SCRIPT" | grep -n '\${TMO\[@\]}'; }
+if tmobare | grep -q .; then
+  bad "bare \"\${TMO[@]}\" — aborts under set -u on bash < 4.4 with no timeout installed:"
+  tmobare | sed 's/^/        /'
+else
+  ok "every TMO expansion survives an empty array under set -u"
+fi
+
 # Same strip() as the banned-verbs check above: a comment that names
 # `set -o pipefail` to explain why it's avoided (see cap() in the script)
 # is documentation, not the directive itself.
@@ -233,9 +259,15 @@ grep -q '^| appdata | prefer |' "$TMP/u.md" && ok "share row: name from filename
 grep -q '^| crlf | no |  | mostfree | disk1 |$' "$TMP/u.md" \
   && ok "CRLF share row stays on one line" \
   || bad "CRLF share row broken — a CR is reaching the table"
-grep -q '^Flash identity: `NAME=FIXTURE_NAME,COMMENT=FIXTURE_COMMENT`$' "$TMP/u.md" \
-  && ok "CRLF flash identity joins on one line" \
-  || bad "flash identity wrong — a CR is reaching the joined line"
+# The separator is `, ` and not `,` because R2-007 replaced `paste -sd', '`
+# here. Two items were the case the review called safe, and they were not: with
+# two lines paste only ever reaches the FIRST delimiter of its cycle, so this
+# cell rendered `,` while every call site asked for `, `. Not mangled, just
+# quietly not what the code said — which is why this assertion is written
+# against the whole line rather than a substring.
+grep -q '^Flash identity: `NAME=FIXTURE_NAME, COMMENT=FIXTURE_COMMENT`$' "$TMP/u.md" \
+  && ok "CRLF flash identity joins on one line, with the separator asked for" \
+  || bad "flash identity wrong — a CR is reaching the joined line, or the join separator is wrong"
 
 # -------------------------------------------------------------- T5 proxmox ---
 head_ "T5  Proxmox LXC and VM parsing"
@@ -246,6 +278,15 @@ grep -q '^| 301 | vm-proxy01' "$TMP/p.md" && ok "VM row parsed"  || bad "VM row 
 grep -q '198.51.100.4/24' "$TMP/p.md"         && ok "LXC IP extracted from net0" || bad "LXC IP missing"
 grep -qE '^\| 202 .*\| yes \|' "$TMP/p.md" && ok "unprivileged flag mapped to yes" || bad "unprivileged flag wrong"
 grep -q 'media=cdrom' "$TMP/p.md"         && bad "cdrom leaked into VM disk list" || ok "cdrom excluded from disks"
+
+# R2-007, the case a two-item join cannot show. `paste -sd'; '` cycles its
+# delimiters, so three disks joined as `a;b c` — the third separator silently
+# became a bare space and a consumer splitting the cell on "; " got two disks
+# where the VM has three. Asserted on the whole cell: a grep for one disk name
+# passes against the broken output too, since the damage is between items.
+grep -qF '| scsi0=local-zfs:vm-301-disk-0,size=21G; scsi1=local-zfs:vm-301-disk-1,size=100G; scsi2=local-zfs:vm-301-disk-2,size=500G |' "$TMP/p.md" \
+  && ok "three VM disks join with a real separator, not a delimiter cycle" \
+  || { bad "three-item join wrong — paste -d cycling is back:"; grep -o 'scsi0=[^|]*' "$TMP/p.md" | sed 's/^/        /'; }
 
 # ----------------------------------------------------------------- T6 perc ---
 head_ "T6  PERC / MegaRAID with sparse device IDs"
@@ -358,6 +399,23 @@ grep -q 'iqn.2001-04.com.example:target0' "$TMP/k.md" \
   && ok "iSCSI target name preserved" || bad "target name lost"
 grep -q 'rd.iscsi.password=REDACTED' "$TMP/k.md" \
   && ok "name-based redaction still applies" || bad "rd.iscsi.password not redacted"
+
+# R2-016, the over-redaction direction again. `key` is an unanchored substring,
+# so every dracut host's `rd.vconsole.keymap=us` was redacted as though it were
+# a LUKS keyfile. The value lost is trivial; the pattern is not, and it gets
+# worse as keywords are added. Both spellings, because only one carries the
+# `rd.` prefix and a fix that anchors on that would pass on half the input.
+grep -q 'rd.vconsole.keymap=us' "$TMP/k.md" \
+  && ok "rd.vconsole.keymap not over-redacted" || bad 'keymap redacted — `key` is matching as a substring'
+grep -q 'vconsole.keyboard=pc105' "$TMP/k.md" \
+  && ok "vconsole.keyboard not over-redacted" || bad 'keyboard redacted — `key` is matching as a substring'
+# The exclusion must not have opened a hole: a name that genuinely contains
+# `key` AND is a credential still goes. rd.luks.key is asserted above by its
+# secret value; this asserts the NAME side of the same parameter survives the
+# new `!~` clause, which a careless `keym*` pattern would have broken.
+grep -q 'rd.luks.key=REDACTED' "$TMP/k.md" \
+  && ok "rd.luks.key still redacted despite the keymap exclusion" \
+  || bad "rd.luks.key no longer redacted — the exclusion is too broad"
 grep -q 'rd.iscsi.initiator=iqn.1994-05' "$TMP/k.md" \
   && ok "non-secret iscsi params untouched" || bad "over-redacted rd.iscsi.initiator"
 
@@ -748,6 +806,26 @@ grep -q 'TESTMON-27' "$TMP/d.md" && ok "product name recovered" || bad "product 
 grep -q 'SN0123456789' "$TMP/d.md" && ok "panel serial recovered" || bad "panel serial missing"
 grep -q 'card1-DP-2' "$TMP/d.md" \
   && bad "disconnected connector (0-byte edid) produced a row" || ok "0-byte edid produces no row"
+
+# R2-013. The Displays table built its rows by hand instead of through row(),
+# which is the helper that escapes `|` — C-004's ledger entry claimed there was
+# exactly one table outside it and there were two. The fixture is built here
+# rather than committed: a connector directory whose NAME carries a pipe is the
+# only way to reach the escape, since the `strings` branch filters `|` out of
+# the display text already and the edid-decode branch is not installed
+# everywhere.
+mkdir -p "$TMP/drmpipe/card1-D|P-9"
+cp "$FIX/drm/card1-DP-1/edid" "$TMP/drmpipe/card1-D|P-9/edid"
+sed -e "s#/sys/class/drm#$TMP/drmpipe#g" "$SCRIPT" > "$TMP/drmpipe.sh"
+bash "$TMP/drmpipe.sh" > "$TMP/dp.md" 2>/dev/null
+grepF() { grep -qF "$1" "$2"; }
+grepF '| card1-D\|P-9 |' "$TMP/dp.md" \
+  && ok "pipe in a connector name escaped" || bad "pipe in a connector name not escaped — the row is built outside row()"
+# The escape alone is not enough: the row must still split into its 2 declared
+# cells, which is what an escape is FOR. Same assertion shape as T4 and T6.
+sed -n '/card1-D/s/\\|//gp' "$TMP/dp.md" | awk -F'|' '{print NF-2}' | grep -qx '2' \
+  && ok "escaped display row still splits into its 2 declared cells" \
+  || bad "escaped display row has the wrong cell count"
 # The stat-0 trap, and the only assertion here that a plain file cannot make:
 # EVERY real edid attribute reports `stat -c%s` = 0, including the ones handing
 # back a full 256 bytes, so a `[ -s ]` gate skips every monitor on the host. A
@@ -1024,6 +1102,222 @@ PATH="$TMP/minbin" bash "$TMP/dmi.sh" > "$TMP/dmiblind.md" 2>/dev/null
 grep -q 'FIXTURE-MODEL-9000' "$TMP/dmiblind.md" \
   && bad "filled DMI with no way to tell a container from bare metal" \
   || ok "no systemd-detect-virt, no fallback"
+
+# -------------------------------------------------------------- T20 no tmo ---
+# R2-003, the half a grep cannot make. TMO is empty only where `timeout` is not
+# installed, and until this test every PATH in this suite either prepended to
+# the real one or was minbin — which symlinks `timeout` explicitly. So the
+# array the whole finding is about had never once been empty in a test run, in
+# either direction: the bug was invisible AND so would a broken fix have been.
+#
+# This does not reproduce the abort — that needs bash below 4.4 and nothing
+# here is — it asserts the thing that holds on every bash: with no `timeout`
+# on PATH, every command still runs UNWRAPPED and the report is complete. That
+# is the fallback C-003 built the gate for, and it is what a careless fix
+# (quoting the expansion wrong, or dropping it) would break.
+head_ "T20 Empty TMO — no timeout installed"
+
+mkdir -p "$TMP/notmo"
+for u in bash sh uname hostname date id awk gawk sed grep cat head tail wc ls \
+         paste basename sort tr cut strings readlink; do
+  p=$(command -v "$u" 2>/dev/null) && ln -sf "$p" "$TMP/notmo/$u"
+done
+have_not_timeout=$(PATH="$TMP/notmo" command -v timeout 2>/dev/null || true)
+[ -z "$have_not_timeout" ] && ok "fixture PATH really has no timeout" \
+  || bad "fixture PATH still resolves timeout — this test proves nothing"
+
+# Stubs for the two expansions that sit in the MAIN shell rather than inside a
+# command substitution. Those are the sites where the pre-4.4 abort killed the
+# run outright, so they are the ones worth reaching: `docker info` gates the
+# whole Docker section, and systemd-detect-virt gates FR-004's DMI fallback.
+# Both must be PRESENT for the expansion to be evaluated at all — `have` short
+# -circuits first, which is why minbin alone never exercised them.
+printf '#!/bin/sh\n[ "$1" = version ] && echo "Docker NOTMO-28.0"\nexit 0\n' > "$TMP/notmo/docker"
+printf '#!/bin/sh\nexit 1\n' > "$TMP/notmo/systemd-detect-virt"
+chmod +x "$TMP/notmo/docker" "$TMP/notmo/systemd-detect-virt"
+
+PATH="$TMP/notmo" bash "$SCRIPT" > "$TMP/notmo.md" 2>"$TMP/notmo.err"; RC=$?
+
+# The main-shell abort's exact signature: the file stops mid-report. Assert the
+# footer, not the exit code — with docker stubbed the warnings are a fact about
+# the stub, and rc_agrees is the rule for everything else (CI-004).
+grep -q 'End of report' "$TMP/notmo.md" \
+  && ok "report complete with an empty TMO" \
+  || bad "report truncated — a TMO expansion aborted the main shell"
+rc_agrees "$RC" "$TMP/notmo.md"
+[ ! -s "$TMP/notmo.err" ] && ok "stderr empty with an empty TMO" \
+  || { bad "stderr not empty:"; sed 's/^/        /' "$TMP/notmo.err"; }
+# The point of the fallback, not just its survival: the commands ran AND their
+# output arrived. A fix that expanded to nothing and also ate the command would
+# pass every assertion above, since an empty section is not a warning. The
+# string is one the stub invented, so this asserts nothing about the runner.
+grep -q '^### Docker' "$TMP/notmo.md" \
+  && ok "unwrapped docker gate still ran and passed" \
+  || bad "docker section absent — the gate command did not run unwrapped"
+grep -q 'Docker NOTMO-28.0' "$TMP/notmo.md" \
+  && ok "unwrapped command's output reached the report" \
+  || bad "command ran but its output was lost with an empty TMO"
+
+# --------------------------------------------------------- T21 megaraid base --
+# R2-009. The miss counter was armed from the first iteration, so a controller
+# numbering its drives from 10 upward was abandoned at ID 9 with its whole
+# array behind it — and the section then PRINTED that no drives answered, which
+# is a wrong answer rather than a missing one.
+#
+# T6's fixture answers at IDs 0, 1, 8 and 9, so the suite could not see this:
+# every one of those is below the threshold. This is the same fixture shape
+# with the answers moved up, which is the entire difference.
+head_ "T21 MegaRAID drives based above the miss threshold"
+
+# is_root is simulated rather than required, unlike T6's probe half, so this
+# runs on every host instead of only under sudo and CI's root pass. The probe
+# is the branch being tested and it is root-gated; the copy is the documented
+# way to reach it (.claude/rules/collectors.md).
+sed 's/^is_root() .*/is_root() { true; }/' "$SCRIPT" > "$TMP/mr.sh"
+grep -q '^is_root() { true; }$' "$TMP/mr.sh" \
+  && ok "root simulated against a copy" || bad "is_root() not replaced — the probe branch is unreachable"
+
+mkdir -p "$TMP/mr12"
+cat > "$TMP/mr12/smartctl" <<'EOF'
+#!/bin/bash
+[ "$1" = "--scan" ] && { echo "/dev/sdb -d scsi # /dev/sdb, SCSI device"; exit 0; }
+N=""; for a in "$@"; do case "$a" in megaraid,*) N="${a#megaraid,}";; esac; done
+# Answers ONLY at 12 through 15 — the case the old bound could never reach.
+case "$N" in
+  12|13|14|15)
+    printf 'Device Model:     FIXTURE-MR-BASE12\n'
+    printf 'Serial Number:    BASE12-ID-%s\n' "$N"
+    printf 'SMART overall-health self-assessment test result: PASSED\n'
+    exit 0;;
+esac
+echo "failed: No such device" >&2; exit 2
+EOF
+chmod +x "$TMP/mr12/smartctl"
+
+PATH="$TMP/mr12:$FIX/percbin:$TMP/minbin" bash "$TMP/mr.sh" > "$TMP/mr12.md" 2>/dev/null; RC=$?
+
+# Every assertion matches a string this fixture invented, never the live host.
+for n in 12 13 14 15; do
+  grep -q "BASE12-ID-$n" "$TMP/mr12.md" \
+    && ok "drive at device ID $n found" || bad "drive at ID $n missed — the miss counter is armed before the first hit"
+done
+grep -q 'No drives answered' "$TMP/mr12.md" \
+  && bad "reported an empty array on a host whose drives answered at 12-15" \
+  || ok "does not claim the controller is empty"
+# The sparse-ID tradeoff must SURVIVE the fix: past the first hit, ten
+# consecutive misses still stop the walk. 15 + 10 = 25, so nothing past 25 is
+# probed and the stub answers nothing there anyway — what this asserts is that
+# the loop ended rather than running to 31 on every host with a controller.
+grep -q 'megaraid,26' "$TMP/mr12.md" \
+  && bad "probe ran past the miss threshold after its last hit" || ok "miss threshold still stops the walk after the last hit"
+rc_agrees "$RC" "$TMP/mr12.md"
+
+# ------------------------------------------------------------ T22 fallbacks --
+# Two collectors that answered a question the tool does not answer, and warned
+# as though the tool had failed. Both are the same shape: the data was readable
+# the whole time and the report said it was unknown.
+head_ "T22 Degraded-tool fallbacks (BusyBox free, unreadable guest config)"
+
+# --- R2-006: BusyBox free rejects -h ---
+mkdir -p "$TMP/bbfree"
+# BusyBox free takes -b/-k/-m/-g and rejects -h, exactly like this.
+printf '#!/bin/sh\necho "free: unrecognized option: h" >&2\nexit 1\n' > "$TMP/bbfree/free"
+chmod +x "$TMP/bbfree/free"
+
+PATH="$TMP/bbfree:$TMP/minbin" bash "$SCRIPT" > "$TMP/bb.md" 2>"$TMP/bb.err"; RC=$?
+# Scoped to the warnings block and to this collector by name (CI-005): the run
+# is on minbin, so anything else that warns is a fact about the runner.
+sed -n '/^## Collection warnings/,$p' "$TMP/bb.md" | grep -q 'free' \
+  && { bad "warned about free on a host where /proc/meminfo is readable:"; dumpwarn "$TMP/bb.md"; } \
+  || ok "no false warning when free rejects -h"
+grep -qE '^\| Total RAM \| [0-9]+Gi \|' "$TMP/bb.md" \
+  && ok "RAM total recovered from /proc/meminfo" \
+  || { bad "RAM total empty though /proc/meminfo has MemTotal:"; grep -E '^\| Total RAM' "$TMP/bb.md" | sed 's/^/        /'; }
+grep -qE '^ram: "[0-9]+Gi"' "$TMP/bb.md" \
+  && ok "frontmatter ram: filled from the fallback" || bad "frontmatter ram: still null"
+[ ! -s "$TMP/bb.err" ] && ok "stderr empty — the usage error is swallowed" \
+  || { bad "BusyBox free's usage error reached stderr:"; sed 's/^/        /' "$TMP/bb.err"; }
+
+# --- R2-011: pct config fails for every guest it listed ---
+# The worst shape of it: `pct list` names three containers, every config read
+# fails, the whole table disappears, and the script exited 0 — which reads as
+# "this node has no containers" on a node with three.
+mkdir -p "$TMP/pctbad"
+cat > "$TMP/pctbad/pct" <<'EOF'
+#!/bin/bash
+case "$1" in
+list) printf 'VMID       Status     Lock         Name\n201        running                 a\n202        running                 b\n203        running                 c\n';;
+config) echo "cannot read config" >&2; exit 2;;
+status) echo "status: running";;
+esac
+EOF
+chmod +x "$TMP/pctbad/pct"
+
+PATH="$TMP/pctbad:$TMP/minbin" bash "$TMP/mr.sh" > "$TMP/pctbad.md" 2>/dev/null; RC=$?
+sed -n '/^## Collection warnings/,$p' "$TMP/pctbad.md" | grep -q 'pct config' \
+  && ok "names pct config when every guest read fails" \
+  || { bad "three containers vanished from the report in silence:"; dumpwarn "$TMP/pctbad.md"; }
+sed -n '/^## Collection warnings/,$p' "$TMP/pctbad.md" | grep -q 'for 3 of the containers' \
+  && ok "warning counts the dropped guests" || bad "warning does not say how many rows are missing"
+rc_agrees "$RC" "$TMP/pctbad.md"
+
+# ---------------------------------------------------- T23 silent omissions ---
+# Two one-line changes whose failure mode is the same and is the worst kind
+# this report has: data quietly missing from a document read as ground truth,
+# with no warning, because the code looked right.
+head_ "T23 Silent omissions (df prefix filter, single timestamp)"
+
+# --- R2-019: the df exclusion filter was an unanchored prefix match ---
+mkdir -p "$TMP/dfbin"
+cat > "$TMP/dfbin/df" <<'EOF'
+#!/bin/sh
+# Two filesystems whose names BEGIN with an excluded word and are not it, and
+# the four that genuinely should be dropped.
+cat <<'D'
+Filesystem     Type      Size  Used Avail Use% Mounted on
+nonessential   zfs       2.0T  1.1T  900G  56% /srv/nonessential
+overlayfs-x    fuse       50G   10G   40G  20% /srv/ovl
+tmpfs          tmpfs      16G     0   16G   0% /dev/shm
+none           overlay     1G    0    1G   0% /run/x
+D
+EOF
+chmod +x "$TMP/dfbin/df"
+
+PATH="$TMP/dfbin:$TMP/minbin" bash "$SCRIPT" > "$TMP/df.md" 2>/dev/null
+grep -q 'nonessential   zfs' "$TMP/df.md" \
+  && ok "filesystem named like an excluded prefix survives the filter" \
+  || bad "a real filesystem was dropped because its name begins with 'none'"
+grep -q 'overlayfs-x' "$TMP/df.md" \
+  && ok "overlayfs-x survives the filter" || bad "overlayfs-x dropped as though it were 'overlay'"
+# The filter must still do its job — both directions, or a fix that deletes it
+# passes the two assertions above.
+grep -qE '^tmpfs +tmpfs' "$TMP/df.md" \
+  && bad "tmpfs is no longer excluded — the filter stopped working" || ok "tmpfs still excluded"
+grep -qE '^none +overlay' "$TMP/df.md" \
+  && bad "none is no longer excluded — the filter stopped working" || ok "none still excluded"
+
+# --- R2-022: three date calls could straddle midnight ---
+# Structural, because the runtime half cannot fail on demand: two `date` calls
+# agree on the date every second of the day except one. So the check is that
+# only ONE call can produce a date at all — the same reasoning as T1's TMO
+# grep, and stated rather than dressed up as a behavioural test.
+if [ "$(grep -c "date '+%Y-%m-%d" "$SCRIPT")" -eq 0 ]; then
+  ok "no second date call can disagree with the captured timestamp"
+else
+  bad "a date-formatting call is back — it can straddle midnight against NOW_ISO:"
+  grep -n "date '+%Y-%m-%d" "$SCRIPT" | sed 's/^/        /'
+fi
+
+# The runtime half, which is not decoration: it catches the slice itself
+# breaking. Asserted by equality rather than against today's date, which would
+# make this a clock check.
+FENCEDATE=$(sed -n 's/.*hw-inventory:begin .*collected=\([0-9-]*\)T.*/\1/p' "$TMP/clean.md")
+COLLDATE=$(sed -n 's/^collected: \([0-9-]*\)$/\1/p' "$TMP/clean.md")
+if [ -n "$FENCEDATE" ] && [ "$FENCEDATE" = "$COLLDATE" ]; then
+  ok "fence and collected: agree on the date ($FENCEDATE)"
+else
+  bad "fence date '$FENCEDATE' and collected: '$COLLDATE' disagree, or one did not parse"
+fi
 
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

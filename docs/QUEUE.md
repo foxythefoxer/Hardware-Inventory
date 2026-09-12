@@ -32,25 +32,34 @@ That is not "nothing left to do", and the difference matters more now than it di
 when this list was full. Three bodies of work sit outside this file by design,
 and an empty **Remaining** is exactly when they get forgotten:
 
-- **Code review round two is adjudicated down to its CRITICAL and one HIGH only.**
-  `R2-001` and `R2-002` are done; the other **25 of 27 findings have never been
-  through `/adjudicate`** and therefore cannot appear here, accepted or rejected.
-  Four were re-checked against the file on 2026-09-12 and are still live: F-003
-  (`pveversion` unwrapped against a FUSE mount, while the same binary is wrapped
-  120 lines below), F-007 (`"${TMO[@]}"` under `set -u` below bash 4.4), F-009
-  (BusyBox `free -h`), F-014 (`paste -sd', '` cycling its delimiters). The
-  documents are in [`reviews/`](reviews/); the count line is at the head of the
-  `R2-` section in [`DISPOSITIONS.md`](DISPOSITIONS.md).
+- ~~**Code review round two is unadjudicated below its CRITICAL.**~~ **Closed
+  2026-09-12.** All 27 findings have a verdict: 23 accepted and implemented as
+  `R2-001` … `R2-023`, 4 declined and written into
+  [`collectors.md`](../.claude/rules/collectors.md) so they are not
+  re-proposed. This bullet stays, struck through, because the *class* is what
+  matters and it will recur: a review round that lands as one large document
+  produces a backlog no file tracks until someone adjudicates it, and this one
+  sat at 2 of 27 for three days. The next round wants its findings ruled on as
+  they are read, not filed whole.
 - [`PRIOR-ART.md`](PRIOR-ART.md) holds leads that have never been adjudicated
   either.
 - Open entries in [`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is
   still waiting on from host classes this machine is not — FT-013 is FR-004's
-  own, and an LXC answering it `0` reopens FR-004 as a defect.
+  own, and an LXC answering it `0` reopens FR-004 as a defect. **R2 added
+  FT-014 and FT-015**, and FT-015 is the one that would change a rating rather
+  than a fix: if a real controller numbers its drives from 10 or higher, R2-009
+  was a HIGH.
 
 **An unadjudicated review round rots the same way this queue does, and has less
 holding it up** — a queue item is at least visible in one line here, while a
 finding nobody ruled on is 150,000 bytes into a document whose own README says
-not to act on it without reading the ledger first.
+not to act on it without reading the ledger first. **R2 is the worked example
+and it is now closed:** it sat at 2 of 27 adjudicated while this file said
+"Remaining: nothing", which was true of the queue and false of the repo. Four of
+the 25 that were still open turned out to be defects a running host would hit —
+one hang, one total loss of a healthy array, one false warning on Alpine, one
+silent omission from the filesystem table. **Rule the findings as you read them.
+A round filed whole is a backlog no file tracks.**
 
 **Read the ledger entry before implementing any accepted FR.** For an
 accepted-with-changes item the conditions **are** the acceptance, and a summary
@@ -83,6 +92,53 @@ Verified against the file and covered by `tests/run.sh` where testable.
   its `## <hostname>` heading replaced with the fixed `## Hardware inventory`, so a
   consumer pasting the report into a hand-written document has a heading-level-agnostic
   boundary and no longer a title that collides with the document's own. Issue #5. v10.
+- **R2-012 … R2-023** — the LOW/NITPICK batch, twelve of sixteen accepted, v11.
+  Two tables that built rows outside `row()`/`esc()` routed through them —
+  C-004's entry claimed there was one and there were two. `key` no longer
+  redacts `vconsole.keymap` on every dracut host, with `rd.luks.key` asserted
+  still-redacted so the exclusion cannot widen unnoticed. The `df` filter
+  anchored: unanchored it silently dropped any filesystem whose name begins
+  with `none`, `overlay` or `tmpfs`. `docker ps -a` and `smartctl --scan` each
+  run once instead of twice. One timestamp feeds the fence and `collected:`, so
+  the two machine-read date fields cannot disagree. Plus `yk()` stripping CR,
+  `IPMI_SEL_LINES`, `g()` taking its file as an argument, two more tools inside
+  the timeout convention, and comments recording the racadm and docker-gate
+  judgments. **Four declined** — `F-020`, `F-021`, `F-023`, `F-027` — with
+  `F-023` the one worth knowing: capturing that section to fix its fence would
+  put four `warn` calls in a subshell and lose them.
+- **R2-005 … R2-011** — all seven R2 MEDIUMs, v11. `fld()`'s key anchored, so a
+  future `lsblk` column that merely ends with an existing key can no longer make
+  the device table name the wrong device (T6's fixture grew `KNAME`, and its
+  existing row assertion catches it). `free -h` falls back to `/proc/meminfo`,
+  so BusyBox rejecting a flag is no longer reported as a broken collector.
+  `paste -sd` replaced by `joinby` at eight sites — it cycles delimiters, so
+  three items joined as `a,b c`, **and two items silently used only the first
+  delimiter**, which the review had cleared as safe. `findmnt --real` falls back
+  for util-linux below 2.28 (**FT-014**). The megaraid probe arms its miss
+  counter only after the first hit — a controller numbering drives from 10 lost
+  its entire array *and the report said so* (**FT-015**). The two guest loops
+  and the probe are bounded by `RUN_BUDGET_S` / `MEGARAID_PROBE_S`, and warn
+  when they cut. A failing `pct`/`qm config` is counted and warned once instead
+  of dropping guests in silence. T21 and T22 are new; all five fixes with
+  behaviour changes were mutation-verified.
+- **R2-003** — all 24 `"${TMO[@]}"` expansions changed to the empty-array-safe
+  `${TMO[@]+"${TMO[@]}"}`. Below bash 4.4 the bare form is an unbound variable
+  under `set -u` when the array is empty — which is precisely the host with no
+  `timeout` installed, the one the fallback exists for. Two sites are in the
+  main shell, where that abort truncates the report instead of emptying one
+  capture; the second of them was added by FR-004 four months *after* the review
+  named the first. T1 greps for the bare form (comments stripped — it failed on
+  the comment that names it before it failed on any code), and **T20 runs the
+  script with no `timeout` on `PATH` at all**, which no test in this suite had
+  ever done. Not reproducible here: bash 5.3.15.
+- **R2-004** — `pveversion` on the Identity line wrapped in `tmo 10`. It read
+  `/etc/pve` unwrapped — pmxcfs, a FUSE mount that blocks rather than fails when
+  the node loses quorum — while the same binary was already wrapped 700 lines
+  below. It is the earliest collector in the file, so it stalled the run before
+  any section printed. The check is a fixture edit, not a new test:
+  `badbin/pveversion` exited 1 for every call, and an error is not how a wedged
+  FUSE mount fails, so T3 never saw it. It now sleeps on the bare call.
+  Mutation-verified: unwrapped RC=124 with no footer, wrapped RC=1 complete.
 - **R2-001** — `nolog` passed to the three `perccli`/`storcli` calls, which otherwise
   write `storcli.log` into the working directory: a `show` verb that writes, which is why
   no banned-verb list could see it. T1 greps for the keyword instead of a verb, and T13's

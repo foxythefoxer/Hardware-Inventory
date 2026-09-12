@@ -918,6 +918,12 @@ One reviewer this round: **Anthropic Claude Opus 5**, 2026-09-09, against
 [`reviews/`](reviews/), committed unedited but for the Commit SHA cell each one instructed
 be filled in before filing. 27 findings: 1 CRITICAL, 3 HIGH, 7 MEDIUM, 11 LOW, 5 NITPICK.
 
+**Adjudicated: 27 of 27. The round is closed.** 23 accepted and implemented, 4 declined
+(`F-020`, `F-021`, `F-023`, `F-027` — all in the LOW/NITPICK batch below, and in
+[`collectors.md`](../.claude/rules/collectors.md) so they are not re-proposed). Nothing
+from R2 is outstanding; what remains unverified is on host classes this machine is not, and
+is in [`FIELD-TESTS.md`](FIELD-TESTS.md) as FT-011, FT-012, FT-014 and FT-015.
+
 ### R2-001 — `perccli`/`storcli` invoked without `nolog` — accepted, done
 
 Provenance: Claude Opus 5's `F-001`, CRITICAL, and the round's only ship-blocker.
@@ -1014,6 +1020,429 @@ rule already applies to a dependency's flags. 157 passed, 0 failed.
 
 **Not verified here:** this host runs `upowerd`, so the activation itself is inferred from
 the unit file rather than measured. **FT-012** asks for the two-command answer.
+
+### R2-003 — bare `"${TMO[@]}"` aborts under `set -u` below bash 4.4 — accepted, done
+
+Provenance: Claude Opus 5's `F-007`, HIGH.
+
+**The construct.** Below bash 4.4, `"${arr[@]}"` on an **empty** array is an unbound
+variable under `set -u` and the shell exits. `TMO` is empty on exactly one class of host:
+the ones with no `timeout` installed — which is the class its `have timeout` fallback was
+written for (C-003). So the guard that exists to keep minimal hosts working was the thing
+that killed them.
+
+**Twenty-four expansions, and the main-shell count grew after the review was filed.** The
+reviewer found one site in the main shell (the `docker info` gate) where the abort kills
+the run outright rather than emptying one capture in a subshell. There are now **two**:
+FR-004 added a `systemd-detect-virt -q -c` call in an `if` condition four months later,
+which is the same shape. Nobody was careless — the site is correct against every bash in
+this estate. **A construct that is wrong only on hosts you do not own gets re-added by
+ordinary good work**, which is the argument for the grep rather than for a fix alone.
+
+**The fix.** `${TMO[@]+"${TMO[@]}"}` at all 24 sites — one `sed`. It expands to nothing
+when the array is empty and is byte-identical on 4.4 and later. **This does not reopen
+A-004:** the array stays, `tmo()` stays, both keep their roles. The alternative the
+reviewer named — dropping the README's bash floor to 4.4 — trades a one-token fix for a
+narrower support claim, and the floor is load-bearing for the Alpine and enterprise-distro
+cases this round raised elsewhere.
+
+**Not reproducible here, stated rather than hidden.** This host is bash 5.3.15, where both
+forms are correct; `bash -c 'set -u; A=(); "${A[@]}" true'` prints `survived`. The defect
+is read from the bash 4.4 changelog, not measured. That is why it is held two ways.
+
+**The check, and the coverage hole it exposed.** T1 greps for the bare form, stripping
+comments first — the TMO comment block deliberately names the bare form to say why it is
+not used, and **the check failed on that comment before it failed on any code**, which is
+the same lesson `strip()` already encodes for the banned-verb grep. Verified by mutation:
+`sed` the safe form back to bare and T1 names all 24 sites.
+
+The grep cannot show the empty-TMO path still *works*, so T20 runs the script on a `PATH`
+with no `timeout` at all. That case had **never once run in this suite**: every other test
+either prepends to the real `PATH` or uses T8's `minbin`, which symlinks `timeout`
+explicitly. The array the whole finding is about had been empty in zero test runs, so a
+broken fix would have been as invisible as the bug. T20 stubs `docker` and
+`systemd-detect-virt` because `have` short-circuits before the expansion is ever
+evaluated — without them the two main-shell sites are unreachable — and asserts a string
+the stub invented (`Docker NOTMO-28.0`) reaches the report, so a fix that expanded to
+nothing *and ate the command* fails rather than passes.
+
+183 passed, 0 failed.
+
+### R2-004 — `pveversion` unwrapped against a FUSE mount — accepted, done
+
+Provenance: Claude Opus 5's `F-003`, HIGH.
+
+**The file contained its own counter-example, for the second time this round.** Bare
+`pveversion` ran unwrapped on the Identity line while the same binary ran under `tmo 15`
+some 700 lines below. R2-001 was that same shape — `-NoLog` present in one RAID branch and
+missing in the one above it. Two of this round's three HIGH findings are a correct
+treatment that failed to reach a sibling call site, which is worth more than either fix:
+**grep the other callers before closing a finding**, because the reviewer's line number is
+where the symptom was, not where the class ends.
+
+**Why this site is the worst one in the file to leave unwrapped.** `pveversion` reads
+`/etc/pve`, which is pmxcfs — a FUSE filesystem backed by corosync. On a node that has lost
+quorum, reads under it **block rather than fail**, and no `2>/dev/null` helps with a call
+that never returns. The Identity table is the earliest collector in the script, so this
+stalls the run *before any section prints*. The exit-code contract promises the report is
+written in full either way; a hang is the one failure mode that breaks that promise, and it
+breaks it here into a consumer getting nothing at all rather than a degraded report.
+
+The comment at the constants block names this exact line as a deliberate bare `head -1`
+site, so the line was looked at while thinking about `cap()` and not while thinking about
+`$TMO`. Both notes now sit together at the call.
+
+**The fix.** `tmo 10 pveversion`. `tmo` rather than `"${TMO[@]}"` is arbitrary here — both
+are 10s — and it reads better next to the `tmo 15` site it should have matched.
+
+**The check is a fixture edit, not a new test.** `badbin/pveversion` exited 1 for every
+call, which is why T3 — the test that exists *for this defect class* — never saw it. An
+error is not the failure mode of a FUSE mount that has lost quorum; a **hang** is. The stub
+now sleeps 300 on the bare call and keeps the error for `-v`, which is already wrapped:
+two failure modes on one binary, the shape of the real thing.
+
+**Verified by mutation, and it is the clearest result in this batch.** Unwrapped, under
+`badbin` with an outer `timeout 40`: **RC=124, elapsed 40s, no footer** — hung at the first
+collector, exactly as argued. Wrapped: **RC=1, elapsed 30s, footer present**, a complete
+report naming its failed collectors. T3's existing assertions catch both halves without a
+line of new test code.
+
+**Not verified here:** no Proxmox node in reach, and the wedged-quorum state cannot be
+staged on one anyway. What is measured is that a blocking `pveversion` stops the run and
+that the wrapper bounds it — the FUSE behaviour itself is read from pmxcfs's design, not
+observed.
+
+### R2-005 — `fld()` returns the wrong column if a suffix-sharing key is added — accepted, done
+
+Provenance: Claude Opus 5's `F-008`, MEDIUM.
+
+**Correct today, wrong on the next edit.** `fld()` pulled `key="value"` out of an `lsblk -P`
+line with a greedy `.*` prefix and a `[[:space:]]\{0,\}` that matches zero characters, so the
+key was not anchored to anything. A key that merely *ends* with the one asked for won the
+match instead. The seven columns the script requests happen to have distinct suffixes, so
+nothing is broken in the file as it stands.
+
+**Measured here, and it reproduces the reviewer's result exactly:**
+
+```
+NAME="sda" KNAME="sdz" TYPE="disk" SIZE="1.8T"   ->  fld NAME  returned  sdz
+```
+
+`PARTLABEL` against `LABEL` and `PKNAME` against `NAME` break the same way. The consequence
+is not a blank cell: the device table would **name a device the row does not describe**, and
+every `smartctl` probe built from that name targets the wrong node. Anchored, the same line
+returns `sda`, and all seven current columns still parse unchanged — checked one by one.
+
+**This is the `lsblk -P` column-shift bug in different clothes.** The comment above the
+capture exists specifically to stop a future maintainer simplifying `-P` back into columnar
+output, because columnar silently shifts every cell after an empty field. This is the same
+failure reached through the parser instead of the format.
+
+**The check costs no new test.** `KNAME="MUSTNOTWIN"` goes into T6's `lsblk` fixture, and
+T6's existing `/dev/sdb` row assertion catches the regression for free — verified by
+mutation: un-anchor the pattern and T6 fails with "device row missing or columns shifted".
+The fixture comment records that the script does not request `KNAME` and that the column is
+there to hold the anchor, so nobody deletes it as unrealistic.
+
+### R2-006 — BusyBox `free` rejects `-h`, producing a false warning — accepted, done
+
+Provenance: Claude Opus 5's `F-009`, MEDIUM.
+
+**A warning that is defensible by the letter of the contract and wrong by its intent.**
+BusyBox `free` takes `-b`, `-k`, `-m`, `-g` and rejects `-h`. On Alpine without procps the
+usage error goes to the `2>/dev/null` this call already carries, `FREE` is empty, `RAMTOTAL`
+is empty, and the script warned that `free` reported no total memory — then exited 1. The
+tool was present and permitted and returned nothing, which is exactly the warn condition.
+But `free` did not fail. **We asked it a question it does not answer**, and the answer was
+sitting in `/proc/meminfo` the whole time.
+
+That distinction is worth adding to the exit-code contract's judgment list, because it is
+not currently there: *a tool rejecting our flags is our defect, not its failure.*
+
+**The file already solved this one paragraph above.** The CPU model falls back from `lscpu`
+to `/proc/cpuinfo` ten lines earlier. RAM had no equivalent, and now takes the same one.
+The warning stays but moves below the fallback, so it fires only when both sources are
+silent.
+
+**Not fixed, and deliberately:** the Snapshot rows read `$3` and `$7` of the same `free`
+output and still render blank on such a host. They are cosmetic, the reviewer raised no
+separate finding, and reconstructing them from `/proc/meminfo` means reimplementing `free`'s
+used/available arithmetic — which is a different and worse trade than one `MemTotal` read.
+
+**The check.** T22 stubs a `free` that rejects `-h` exactly as BusyBox does. It asserts the
+absence of the warning *scoped to the warnings block and by name* (CI-005), that the RAM row
+and the frontmatter `ram:` both fill from the fallback, and that stderr stays empty.
+Mutation: drop the fallback and three of the four assertions fail.
+
+### R2-007 — `paste -sd', '` cycles its delimiters — accepted, done
+
+Provenance: Claude Opus 5's `F-014`, MEDIUM.
+
+**`paste -d` takes a delimiter *cycle*, not a separator.** Measured here:
+
+```
+printf 'a\nb\nc\n' | paste -sd', ' -   ->  a,b c
+printf 'a\nb\n'    | paste -sd', ' -   ->  a,b
+```
+
+Eight call sites carried it. A host with three resolvers rendered
+`Resolvers: 192.0.2.1,198.51.100.1 203.0.113.1` — every value present, so this is fidelity
+rather than loss, but a consumer splitting that cell on `", "` gets two fields where the
+host has three. Three is the ordinary case for `/etc/resolv.conf` and for a Proxmox VM's
+disks.
+
+**The review said two items look correct. They were not, and this is the part worth
+keeping.** With two lines `paste` only ever reaches the *first* delimiter of the cycle, so
+the Unraid flash-identity cell rendered `NAME=x,COMMENT=y` while the code asked for `, `.
+Not mangled — just quietly not what was written, at the one site the review cleared as safe.
+That turned up as a T4 failure when the join changed, which is how it was found.
+
+**This is not FR-005 reopened.** That entry diagnosed a CR sitting in front of `paste`'s
+delimiter and concluded correctly that the symptom was not a join bug. It was looking at the
+flash-identity site, which has exactly two items and where the cycling never shows.
+
+**One helper, not eight inline `awk`s** — `joinby`, which is the accumulator idiom already
+in the file at the `apcaccess` site rather than a new construct. `paste -sd' '` in the
+display section is **deliberately left alone**: a single-character delimiter cannot cycle,
+and the comment says so, so nobody "fixes" it later.
+
+**The check.** The VM fixture grew from one disk to three, which is both the defect's
+trigger and the ordinary shape of a guest, and T5 asserts the whole joined cell — a grep for
+one disk name passes against the broken output, since the damage falls between items. T4's
+flash-identity assertion moves to the separator the code actually asks for. Mutation:
+restore `paste -sd` and both fail.
+
+**Report-visible, and the reason this batch mints v11.**
+
+### R2-008 — `findmnt --real` is absent below util-linux 2.28 — accepted, done
+
+Provenance: Claude Opus 5's `F-015`, MEDIUM.
+
+`--real` arrived in util-linux 2.28 (2016). RHEL and CentOS 7 ship 2.23, where it is an
+unrecognized option written to the discarded stderr. `FMOUT` came back empty, the mount
+table was missing from the report, and the script warned that `findmnt` listed no mounted
+filesystems and exited 1 — on a distribution the README's matrix lists as **Full** support.
+
+**An emptiness test conflating two causes**, which is the class
+`.claude/rules/collectors.md` already warns about under "test the thing that actually
+indicates failure". Here emptiness meant either "no mounts" (impossible) or "the flag does
+not exist" (a version difference), and the warning asserted the first.
+
+**Fixed by falling back to a type-exclusion list**, which gets the same table off the older
+flag set. The warning stays: an empty result after both attempts really is a failed call,
+since no host has zero mounts. It just no longer fires on a version difference.
+
+**The `df` test three lines above is safe for a reason nobody had written down**, and it is
+now written down at the site: `df` always prints a header row that the `grep -Ev` filter
+cannot remove, so `DFOUT` is empty only when `df` itself produced nothing. A future change
+that adds `--output=` and drops the header would turn it into the same conflation silently.
+
+**Not verified here:** this host runs util-linux 2.42.3, where `--real` works, so the first
+branch always wins. What is verified is that the fallback's flag form produces the same
+four columns on this host. **FT-014** asks for the real answer on a RHEL/CentOS 7 box —
+whether `findmnt -t no...` populates the table there — which is the one thing no stub
+settles, since a stub proves only that our own fallback ran.
+
+### R2-009 — the megaraid probe finds nothing when drive IDs start above 9 — accepted, done
+
+Provenance: Claude Opus 5's `F-013`, MEDIUM.
+
+**Total loss of a healthy array, and the report asserted the opposite.** `misses` started at
+0 and was armed from the first iteration, so the walk gave up at `n=9` when no ID below 10
+had answered. The section then printed "_No drives answered `-d megaraid,N`. The controller
+may be in HBA/IT mode..._" on a host whose array was right there, and exited 0.
+
+**Reproduced here, and it matches the reviewer's table row for row.** A stub `smartctl`
+answering only at chosen device IDs, over T6's existing `lsblk` and `lspci` fixtures, with
+`is_root` forced true:
+
+| Lowest device ID that answers | Drive rows emitted |
+|---|---|
+| 0, 1, 2, 3 | 4 |
+| 9, 10, 11 | 3 |
+| 10, 11, 12 | **0** |
+| 12, 13, 14, 15 | **0** |
+
+**This supersedes an adjudicated verdict, and says so.** The `G, edge cases` row accepted
+"megaraid probe can skip drives at sparse IDs beyond the 10-miss threshold" as a documented
+tradeoff against a 32-iteration worst case. That verdict was about **partial** loss — some
+drives missing from a table that still appears. The measurement above is total loss plus a
+printed sentence asserting the array is empty, which is a wrong answer rather than a missing
+one: the same distinction that made C-016 a defect rather than a limitation. The sparse-ID
+tradeoff still stands past the first hit and is unchanged.
+
+**The fix is one condition, not the reviewer's.** The miss counter is armed only after the
+first hit. Before that, the walk now covers the whole declared `{0..31}` range rather than
+stopping at an index bound — the reviewer's own `[ "$hits" -eq 0 ] && [ "$n" -ge 12 ]` snippet
+breaks *before* probing ID 12 and so still finds nothing in the base-12 row of their own
+table. Walking the full range is affordable because a miss on an absent ID returns
+immediately; `MEGARAID_PROBE_S=90` is there for the pathological case where every call burns
+its full `tmo 6`, and a probe cut short by it **warns**, because drives past the cut are
+unknown.
+
+**The check.** T21 is T6's fixture with the answers moved to IDs 12-15 — that is the entire
+difference, and T6 could not have caught this because all four of its IDs are below the
+threshold. It simulates `is_root` against a copy rather than requiring root, so unlike T6's
+probe half it runs on every host instead of only under `sudo` and CI's root pass. Mutation:
+re-arm the counter from `n=0` and five assertions fail.
+
+**Not verified here:** no controller in reach, so how often a controller numbers from 10 or
+higher is unknown, and it is the difference between MEDIUM and HIGH. **FT-015** asks for the
+one command that settles it.
+
+### R2-010 — no aggregate deadline — accepted with a narrower scope, done
+
+Provenance: Claude Opus 5's `F-004`, MEDIUM.
+
+Every call is bounded; the run was not. The reviewer's arithmetic for a Proxmox node with 12
+disks, 28 guests, ZFS and Docker sums the per-call budgets to **1,175s — about 20 minutes**,
+against a README that said "can take a minute".
+
+**This is not a hang**, and that matters for how it was fixed: every call returns, so the
+consequence is a cron job overrunning its window and a `tee` that looks frozen, not a report
+that never arrives.
+
+**Accepted as a bound on the variable part of the run, not as an aggregate deadline**, and
+the difference is deliberate. Only three regions scale with host size: the megaraid probe
+and the two guest loops, which are 630s of the 1,175s on their own. Those are bounded —
+`RUN_BUDGET_S=600` checked at the top of each guest loop, `MEGARAID_PROBE_S` on the probe —
+and each warns when it cuts. The remaining ~545s is a fixed number of calls, and a true
+deadline over it would have to abandon a half-written section, which trades a slow report
+for a malformed one. `SECONDS` is a bash builtin since 2.0, so nothing is executed and
+nothing is written to read it. `warn` is safe at all three sites: a `for` loop in the main
+shell is not a subshell.
+
+**Not verified here:** no host in reach is large enough to reach either bound, so the cut
+paths are reasoned rather than measured. The counters and warnings beside them are covered
+by T21 and T22.
+
+### R2-011 — a failing guest config drops the guest in silence — accepted, done
+
+Provenance: Claude Opus 5's `F-017`, MEDIUM.
+
+`[ -z "$CFG" ] && continue` dropped any guest whose `pct config` or `qm config` returned
+nothing, with no warning. **If every call fails the whole table disappears and the script
+still exits 0**, which a consumer reads as "this node has no containers" on a node full of
+them — and `pct list` had already named them, so the script knew better.
+
+This is the same shape as CI-001 and C-016: a section that goes silent where the honest
+answer is "unknown". The exit-code contract's rule applies directly — the tool was present,
+permitted, and returned nothing.
+
+**Counted and warned once per loop, not per guest.** Twenty-eight identical warnings would
+bury the block that exists to be read, and the count is the useful fact: "`pct config`
+returned nothing for 3 of the containers `pct list` named".
+
+**The check.** T22's second half stubs a `pct` whose `list` names three containers and whose
+every `config` fails — the worst shape of it. It asserts the warning by name and that it
+carries the count. Mutation: restore the silent `continue` and both fail.
+
+### R2-012 … R2-023 — the LOW and NITPICK batch, twelve accepted and four declined
+
+Provenance: Claude Opus 5's eleven LOW and five NITPICK findings, adjudicated in one pass
+the way A-009 was. Batched because each is a few lines and because ruling on them
+individually would have produced sixteen commits saying the same thing; **not** batched in
+the verdict — four are declined below and each says why.
+
+Every accepted item is in v11. The ones with a behaviour change are mutation-verified; the
+ones that are comments or conventions are not, and are marked.
+
+**Accepted, and the reason each is more than tidying:**
+
+- **R2-012** (`F-005`) — `systemd-detect-virt` and `strings` wrapped in `TMO`. Neither can
+  realistically block; both were already `have`-guarded with stderr redirected, so they met
+  two thirds of the convention. Fixed anyway because **the convention's value is that it
+  holds without exception**, and the two sites that sat outside it are exactly how a third
+  gets added. No behaviour change, no test.
+- **R2-013** (`F-012`) — the DIMM `awk` table and the Displays accumulator both built rows
+  outside `row()`/`esc()`. **C-004's own ledger entry says there was one such table. There
+  were two.** A `|` in an SMBIOS part number is unlikely, but unescaped it shifts every
+  later cell and attributes a part number to the wrong slot — a wrong answer, which is what
+  this report exists to prevent, so the rating is about likelihood and not consequence. The
+  DIMM `awk` takes the same three-line `esc()` as the Unraid table; the Displays row goes
+  through `row()`. T15 grew a connector whose *name* carries a pipe — built in the temp dir
+  rather than committed, because the `strings` branch filters `|` out of the display text
+  already and `edid-decode` is not installed everywhere, so the connector name is the only
+  path to the escape. Cell count asserted as well as the escape, like T4 and T6.
+- **R2-014** (`F-006`) — `smartctl --scan` captured once instead of run twice. Cost a second
+  15s budget and left a window where a device appearing between the two calls gave a header
+  with nothing under it. Output identical; T6 covers it.
+- **R2-015** (`F-010`) — `yk()` strips CR, matching `row()`. **No caller can supply one
+  today** — `/etc/unraid-version` is on the root filesystem, not the FAT32 flash — so this
+  is defensive and has no test. One substitution, and FR-005's whole lesson was that a CR
+  arrives from a direction nobody predicted.
+- **R2-016** (`F-011`) — `key` was an unanchored substring, so `rd.vconsole.keymap=us` was
+  redacted on every dracut host. **The exclusion names the safe keys rather than tightening
+  the keyword**, because narrowing `key` to `/\.key$|keyfile|luks/` risks the
+  under-redaction direction, which is the worse failure. T9 gained both spellings — only one
+  carries the `rd.` prefix, and a fix anchored on that would pass on half the input — plus
+  an assertion that `rd.luks.key` *is still redacted*, which a careless exclusion would have
+  broken. Mutation-verified.
+- **R2-017** (`F-016`) — `tail -15` became `IPMI_SEL_LINES`, per C-014. Still `tail` and not
+  `cap()`: `cap()` keeps the first N lines and the recent end of an event log is the useful
+  end. The heading now prints the constant, so the two cannot drift.
+- **R2-018** (`F-025`) — two lines of comment, no code. `racadm` present and root **is** the
+  warn condition, and `ipmitool mc info` warns on the same shape twenty lines above. The
+  difference is that IPMI has `[ -e /dev/ipmi0 ]` to prove the hardware exists and racadm
+  has nothing equivalent — it ships with Dell OMSA and installs where no iDRAC answers. The
+  decision was right; it was the only never-warns site in the file with no note saying so,
+  and that note is what stops the next maintainer "fixing" it.
+- **R2-019** (`F-026`) — the `df` exclusion filter was anchored at the start and not the
+  end, so it dropped any filesystem whose name merely *begins* with one of five words.
+  Measured here: a `nonessential` ZFS dataset and an `overlayfs-x` mount both vanished, with
+  no warning, because the emptiness test still saw `df`'s header. **A silent omission from a
+  document read as ground truth** is the category the exit-code contract exists to prevent.
+  T23 asserts both directions — a fix that simply deletes the filter passes the first two
+  assertions. Mutation-verified.
+- **R2-020** (`F-019`) — `CNAMES_ALL` cut from the `docker ps -a` capture already taken
+  instead of asking the daemon again. Removes a 10s budget and a window where a container
+  created between the calls appeared in one table and not the other. `cut` on an empty
+  string yields an empty string, so T12's zero-container case is unchanged.
+- **R2-021** (`F-018`) — comment only, and **the reviewer's recommendation declined in
+  favour of their alternative**. Exit 124 from the docker gate means the socket exists and
+  did not answer in 10s, which is arguably present-and-permitted-and-silent. It stays folded
+  into the gate: splitting on an exit code reopens an adjudicated judgment for one narrow
+  case, and a daemon too wedged to answer `info` in 10s fails every collector behind it
+  anyway. The section is empty either way. Now stated at the site instead of implied.
+- **R2-022** (`F-022`) — three `date` calls could straddle midnight and file the report under
+  one day in `collected:` while the fence printed another. Both are machine-read and
+  **disagreeing with each other is worse than being a second stale**. One `date -Iseconds`
+  is captured and the date sliced off it; only the header's clock time is read separately
+  and nothing parses that. Deliberately *not* fixed by reformatting one call into all three:
+  that needs GNU's `%:z` or changes the fence's ISO offset format, and this round raised
+  BusyBox and old-util-linux portability twice. **The check is structural** — a grep that no
+  second date-formatting call exists — because two `date` calls agree every second of the
+  day but one, so a behavioural test here would be decoration. Said plainly in the test.
+- **R2-023** (`F-024`) — `g()` takes the file as `$2` instead of closing over the loop's
+  `$f`. It worked and cost nothing measurable; a helper that silently depends on an
+  enclosing scope breaks when someone moves the call, and this one is called four times on
+  one line. T4's shares table covers it.
+
+**Declined, with the fact that settles each:**
+
+- **`F-027`, take guest status from the list you already have** — declined as a priority,
+  not as an edit. The reviewer rates it LOW and says they would not push it, and the reason
+  is decisive: **`pct list`'s column order is not a documented interface.** The fix trades
+  two undocumented-format parses plus a fallback for wall clock that only matters on a
+  degraded cluster — which is the case R2-010 now bounds directly. More code and more
+  failure modes to partially re-solve a problem already solved a better way.
+- **`F-020`, make the constants `readonly`** — declined. It prevents nothing that has
+  happened or plausibly could: the constants are assigned once at the top of a one-shot
+  script and never reassigned, and T1 would not catch a reassignment either way. YAGNI.
+- **`F-021`, `printf --` instead of `echo` for the nine separator lines** — declined. Under
+  bash's builtin `echo` a leading `---` prints literally, so nothing is broken and nothing
+  would change in the output. Nine lines of churn for zero behaviour, in a file where every
+  diff has to be reviewed against a read-only guarantee.
+- **`F-023`, the filesystems section prints its fence unconditionally** — declined, and this
+  one is **not** a judgment call about taste. It is the only section that does not follow
+  capture-then-print-if-non-empty, and the reviewer is right that it is an inconsistency.
+  But the fix is to capture the section body into a variable, and **that body contains four
+  `warn` calls** — a command substitution is a subshell, so every one of them would be
+  silently lost (G-002). The proposed fix would trade an unreachable empty fence (`df` is
+  coreutils) for a real hole in the warning accumulator. Reopening this needs a
+  restructuring that keeps `warn` in the main shell, not a capture.
+
+209 → 210 passed, 0 failed across the batch.
 
 ---
 

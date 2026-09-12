@@ -81,6 +81,13 @@ see [Exit codes](#exit-codes).
 `timeout` is strongly recommended but no longer required: without it, commands that
 would have been wrapped simply run unwrapped, so a hung tool can stall the run.
 
+Those two sentences used to contradict each other on the hosts where it mattered. A
+review found that with no `timeout` installed, the empty wrapper array aborted the script
+under `set -u` on any bash below 4.4 — so the fallback for minimal hosts was exactly what
+broke them, and the 3.0 floor was a claim the code did not meet. Fixed in v11 (`R2-003`),
+and the test suite now runs the script with no `timeout` on `PATH` at all, which it had
+never once done.
+
 **Optional.** Each unlocks a section; each is detected before use and skipped if absent:
 
 | Tool | Adds |
@@ -147,8 +154,13 @@ Three things that catch people out:
   fails with permission denied — use `| sudo tee` if you need a root-owned path.
 - **On Unraid, `/root` and `/tmp` are RAM.** Write to a share instead, or lose the file
   on reboot.
-- **PERC and SMART sections can take a minute.** The megaraid probe walks device IDs and
-  each sleeping disk gets a short timeout. `tee` beats a bare redirect there.
+- **A big host can take several minutes, not one.** Every call is bounded, but the run is
+  the sum of them: a Proxmox node with a dozen disks and a couple of dozen guests has an
+  arithmetic worst case around twenty minutes, and the SMART, megaraid and guest-config
+  loops are where it goes. The two regions that scale with host size are bounded —
+  `MEGARAID_PROBE_S` and `RUN_BUDGET_S` near the top of the script — and a run cut short by
+  either says so in the warnings block rather than silently reporting less. `tee` beats a
+  bare redirect there, since a bare one looks frozen.
 
 ### Exit codes
 
@@ -207,7 +219,7 @@ Docker · Failed systemd units · Collection warnings (only when something faile
 ### Version
 
 `collector:` is the version a vault files the report under; since FR-007 the
-opening comment fence carries it too, as `collector=hw-inventory.sh/v10` — the
+opening comment fence carries it too, as `collector=hw-inventory.sh/v11` — the
 copy a parser reads before it has parsed anything. **It moves when the emitted
 report changes for some class of host, and only once per state the world has
 seen.**

@@ -1,4 +1,13 @@
 #!/bin/bash
+# THREE disks, not one, and that is the point of the fixture rather than
+# decoration (R2-007). `paste -sd'; '` treats its argument as a cycle of
+# delimiters, so it joins three items as `a;b c` — correct-looking at two and
+# wrong at three, which is why eight call sites carried it unnoticed. A
+# one-disk VM cannot see the defect; a three-disk VM is also the ordinary
+# shape of a Proxmox guest.
+#
+# ide2 stays a cdrom so the media=cdrom exclusion is still exercised against a
+# disk list that now has something to exclude it FROM.
 case "$1" in
 list) printf '      VMID NAME       STATUS     MEM(MB)    BOOTDISK(GB) PID\n       301 vm-proxy01 running    2048              21.00 1234\n';;
 config) cat <<'C'
@@ -11,6 +20,8 @@ net0: virtio=00:00:5E:00:53:56,bridge=vmbr0
 onboot: 1
 ostype: l26
 scsi0: local-zfs:vm-301-disk-0,size=21G
+scsi1: local-zfs:vm-301-disk-1,size=100G
+scsi2: local-zfs:vm-301-disk-2,size=500G
 C
 ;;
 status) echo "status: running";;

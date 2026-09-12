@@ -12,10 +12,18 @@
 #
 # sda's MODEL carries the literal pipes C-004 is about: unescaped they split
 # the row into extra columns and shift every cell after it.
+#
+# sdb carries KNAME, which the script does NOT request — `-o` names seven
+# columns and KNAME is not one of them. It is here to hold fld()'s anchor
+# (R2-005), which is the one thing about that helper a realistic fixture cannot
+# test: unanchored, `fld NAME` matched the key that merely ENDS with NAME and
+# returned MUSTNOTWIN, so the device table named a device the row did not
+# describe. The assertion that catches it is the ordinary `/dev/sdb` row
+# assertion in T6 — no new test, and it fails the moment the anchor goes.
 cat <<'L'
 NAME="nvme0n1" TYPE="disk" SIZE="1.8T" ROTA="0" TRAN="nvme" MODEL="FIXTURE-NVME" SERIAL="FIXTURE-NVME-0001"
 NAME="sda" TYPE="disk" SIZE="14.6G" ROTA="1" TRAN="usb" MODEL="FIXTURE|BOOT|KEY" SERIAL="FIXTURE-USB-0001"
-NAME="sdb" TYPE="disk" SIZE="3.6T" ROTA="1" TRAN="sata" MODEL="FIXTURE-DISK-A" SERIAL="FIXTURE-SATA-0001"
+NAME="sdb" KNAME="MUSTNOTWIN" TYPE="disk" SIZE="3.6T" ROTA="1" TRAN="sata" MODEL="FIXTURE-DISK-A" SERIAL="FIXTURE-SATA-0001"
 NAME="zd0" TYPE="disk" SIZE="32G" ROTA="1" TRAN="" MODEL="" SERIAL=""
 NAME="loop0" TYPE="loop" SIZE="4G" ROTA="1" TRAN="" MODEL="" SERIAL=""
 L
