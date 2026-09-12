@@ -81,13 +81,6 @@ see [Exit codes](#exit-codes).
 `timeout` is strongly recommended but no longer required: without it, commands that
 would have been wrapped simply run unwrapped, so a hung tool can stall the run.
 
-Those two sentences used to contradict each other on the hosts where it mattered. A
-review found that with no `timeout` installed, the empty wrapper array aborted the script
-under `set -u` on any bash below 4.4 — so the fallback for minimal hosts was exactly what
-broke them, and the 3.0 floor was a claim the code did not meet. Fixed in v11 (`R2-003`),
-and the test suite now runs the script with no `timeout` on `PATH` at all, which it had
-never once done.
-
 **Optional.** Each unlocks a section; each is detected before use and skipped if absent:
 
 | Tool | Adds |
@@ -218,80 +211,14 @@ Docker · Failed systemd units · Collection warnings (only when something faile
 
 ### Version
 
-`collector:` is the version a vault files the report under; since FR-007 the
-opening comment fence carries it too, as `collector=hw-inventory.sh/v11` — the
-copy a parser reads before it has parsed anything. **It moves when the emitted
-report changes for some class of host, and only once per state the world has
-seen.**
-
-**So mint on the re-fetch, not on the merge.** A number is cut when there is a
-reason to tell the estate to pull, and everything landed since ships under it
-together. Between cuts the header carries the number the open batch *will* ship
-as, so `main` is that number unreleased and `git describe --tags` is what
-separates a release from the road to one. A commit that alters the report is not
-by itself a reason to cut — v8 and v9 below are what happens when it is treated
-as one.
-
-**v8 and v9 are the drift this rule exists to prevent, left standing rather than
-rewritten.** v8 was R2-001 — `nolog` on the three RAID-CLI calls, so a `show`
-verb stops writing `storcli.log` into the working directory — and v9 was R2-002,
-the UPower probe gated on a daemon already running. Both are real fixes to the
-read-only guarantee and both deserved to ship. But **neither changed the emitted
-report on any host that had been run**: no estate host has a RAID CLI installed
-at all (FT-011), and the UPower gate stops a daemon being activated rather than
-altering a section. Two numbers for two states nothing ever filed a report under
-is the noise v5's paragraph below argues against — three versions later, against
-the same rule. The tags stay, because a tag never moves and that includes one
-that should not have been cut; the rule they broke is now written above as a
-trigger instead of left implied.
-
-**v7** is FR-005, the first defect a real Unraid host found rather than a review:
-`/boot` is the FAT32 flash device, so its `.cfg` files are CRLF, and the CR rode
-through `$(...)` into the Shares table and the flash-identity line — Markdown
-honours it as a line break, so each row ended after its first cell and the table
-stopped being a table. Report-changing for exactly one host class, which is what
-a number is for.
-
-**v6** is the queue batch: C-005 (os-release parsed, not sourced), C-016 +
-A-007 (one `lsblk -P` capture, and a megaraid probe that skips the USB boot
-key), A-008, A-009 and C-004 (`|` escaped in every table cell). Two of those
-change the report — an Unraid host gets drive rows where it got "no drives
-answered", and any cell containing a pipe stops shifting the columns after it.
-
-**v5** was Displays, UPS, and the CI-001 PCI fix. That last one changed the
-report too — on a host whose PCI devices match none of the section's classes, a
-section and a spurious warning both disappear, and the exit code goes from `1`
-to `0` — and it still did not earn a number of its own, because no report had
-ever been produced by a v5 without it. A version number describes what a
-consumer can be holding, not what the repository did; two numbers for a state
-nothing ever ran is noise in every vault that files by this field. v5 was
-tagged and fetchable before this batch, so this one is v6.
-
-What changed in each version is the *Done* list in
-[`docs/QUEUE.md`](docs/QUEUE.md). The version is written three times in the script —
-the header comment, that `printf`, and the opening fence — and T1 fails unless
-all three agree, which is how a stale `collector:` misfiling every report gets
-caught. T1 matches the sites by pattern rather than by name, so a fourth is
-covered the day it is added and a deleted one fails on the count.
-
-**Every released version is also a git tag, and a tag never moves.** `v7` points
-at the commit that minted it and keeps pointing there after `main` has moved on.
-A *release* earns `v8` and its own tag, never a re-cut `v7` — a host that already
-fetched would go on running the old one and say `v7` either way. Docs, tests and
-hooks change under a tag without minting one; the collector is what the tag is
-for. A header naming a number with no tag behind it is an open batch, which is
-why the two commands below are the pre-flight and not a formality.
-
-Pin a sweep so a month of reports cannot straddle a bump:
-
-```bash
-git -C /opt/hw-inventory fetch --tags
-git -C /opt/hw-inventory checkout v7     # detached HEAD, deliberately
-sudo bash /opt/hw-inventory/hw-inventory.sh > "$(hostname)-$(date +%F).md"
-```
-
-`git -C /opt/hw-inventory describe --tags` says what a host will run before the
-sweep starts; `collector:` in the report says what it ran.
+`collector:` is the version a vault files the report under; the opening comment
+fence carries it too, as `collector=hw-inventory.sh/v11` — the copy a parser
+reads before it has parsed anything. It moves when the emitted report changes
+for some class of host, and only once per state the world has seen. Every
+released version is also a git tag that never moves, so `main` between releases
+is that number unreleased. See [`CHANGELOG.md`](CHANGELOG.md) for what changed
+in each version, how the numbering rule works, and how to pin a sweep to a
+release.
 
 ### Diffing two runs
 
@@ -376,6 +303,7 @@ facts every working host has.
 ```
 hw-inventory.sh      the script
 README.md            this file
+CHANGELOG.md          per-version history and the tagging/minting rule
 CLAUDE.md            the two rules that govern everything, read at session start
 tests/run.sh         the test suite — bash tests/run.sh
 tests/fixtures/      failing/hanging tool stubs, Unraid, Proxmox and cmdline mocks
