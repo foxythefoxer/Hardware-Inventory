@@ -234,6 +234,23 @@ grep -q 'CANARY_TOKEN_MUST_NOT_LEAK' "$TMP/u.md" \
 for slot in parity disk1 cache flash; do
   grep -q "^| $slot |" "$TMP/u.md" && ok "slot '$slot' parsed" || bad "slot '$slot' missing"
 done
+# FR-009, both halves, because the guard in emit() is a skip and a skip is only
+# correct if it fires on exactly one thing. The fixture gives the two slots that
+# share the condition the OLD key tested — device and id both blank — and
+# differ only in what emhttp says the slot is. An assertion on either half alone
+# passes on a guard that drops everything or one that drops nothing.
+grep -q '^| disk3 |' "$TMP/u.md" \
+  && bad "DISK_NP slot rendered — an empty slot is a row of dashes, which is what the guard is for" \
+  || ok "DISK_NP slot suppressed"
+grep -q '^| disk4 |' "$TMP/u.md" \
+  && ok "lost disk with blank device+id still rendered" \
+  || bad "a slot emhttp lost was dropped silently — the guard is keyed on the blank fields, not on status"
+# The row must also carry the status that made it worth keeping. Dropping it
+# silently and rendering it as an anonymous row of dashes are different bugs
+# with the same cause, and the second still contradicts the counters above.
+grep -q '^| disk4 |.*DISK_DSBL' "$TMP/u.md" \
+  && ok "lost slot names its status in the row" \
+  || bad "lost slot rendered without its status"
 grep -q '7.28 TB' "$TMP/u.md" && ok "KB->TB conversion correct" || bad "size conversion wrong"
 # C-004, the awk half. disk2's id carries literal pipes; escaped, the row keeps
 # its 8 cells. The column count is asserted as well as the escape, because a
@@ -1181,12 +1198,16 @@ mkdir -p "$TMP/mr12"
 cat > "$TMP/mr12/smartctl" <<'EOF'
 #!/bin/bash
 [ "$1" = "--scan" ] && { echo "/dev/sdb -d scsi # /dev/sdb, SCSI device"; exit 0; }
-N=""; for a in "$@"; do case "$a" in megaraid,*) N="${a#megaraid,}";; esac; done
+N=""; WANT_I=0
+for a in "$@"; do case "$a" in -i) WANT_I=1;; megaraid,*) N="${a#megaraid,}";; esac; done
 # Answers ONLY at 12 through 15 — the case the old bound could never reach.
+# Identity only under -i, per FR-008: see the note on the percbin stub.
 case "$N" in
   12|13|14|15)
-    printf 'Device Model:     FIXTURE-MR-BASE12\n'
-    printf 'Serial Number:    BASE12-ID-%s\n' "$N"
+    if [ "$WANT_I" = 1 ]; then
+      printf 'Device Model:     FIXTURE-MR-BASE12\n'
+      printf 'Serial Number:    BASE12-ID-%s\n' "$N"
+    fi
     printf 'SMART overall-health self-assessment test result: PASSED\n'
     exit 0;;
 esac
@@ -1318,6 +1339,54 @@ if [ -n "$FENCEDATE" ] && [ "$FENCEDATE" = "$COLLDATE" ]; then
 else
   bad "fence date '$FENCEDATE' and collected: '$COLLDATE' disagree, or one did not parse"
 fi
+
+# ------------------------------------------------------------ T24 sas serial --
+# FR-008's second half. T6 and T21 now cover the missing `-i`, because their
+# stubs answer identity only when it is asked for. Neither covers the SCSI/SAS
+# spelling: smartctl prints `Serial Number:` for ATA and NVMe but
+# `Serial number:` for SAS — all three format strings are in the 7.5 binary.
+# The gate matches case-insensitively, so a SAS drive always cleared it on
+# `Product:` and then landed a blank serial in a table that exists to report
+# serials. Not a dropped row, a row present and wrong, which no row-count
+# assertion can see.
+head_ "T24 SAS drive behind a controller keeps its serial"
+
+sed 's/^is_root() .*/is_root() { true; }/' "$SCRIPT" > "$TMP/sas.sh"
+grep -q '^is_root() { true; }$' "$TMP/sas.sh" \
+  && ok "root simulated against a copy" || bad "is_root() not replaced — the probe branch is unreachable"
+
+mkdir -p "$TMP/sasbin"
+cat > "$TMP/sasbin/smartctl" <<'EOF'
+#!/bin/bash
+[ "$1" = "--scan" ] && { echo "/dev/sdb -d scsi # /dev/sdb, SCSI device"; exit 0; }
+N=""; WANT_I=0
+for a in "$@"; do case "$a" in -i) WANT_I=1;; megaraid,*) N="${a#megaraid,}";; esac; done
+[ "$N" = 0 ] || { echo "failed: No such device" >&2; exit 2; }
+# The SAS shape, exactly as smartctl prints it: no Device Model at all, the
+# model arrives as Product, and the serial has a lowercase 'n'.
+if [ "$WANT_I" = 1 ]; then
+  printf 'Vendor:               FIXTVEND\n'
+  printf 'Product:              FIXTURE-SAS-MODEL\n'
+  printf 'Serial number:        FIXTURE-SAS-SERIAL-0\n'
+fi
+printf 'SMART Health Status: OK\n'
+printf '  number of hours powered up = 4321\n'
+exit 0
+EOF
+chmod +x "$TMP/sasbin/smartctl"
+
+PATH="$TMP/sasbin:$FIX/percbin:$TMP/minbin" bash "$TMP/sas.sh" > "$TMP/sas.md" 2>/dev/null
+
+grep -q 'FIXTURE-SAS-MODEL' "$TMP/sas.md" \
+  && ok "SAS drive answered and its model landed" \
+  || bad "SAS drive missing entirely — the gate or the probe target is wrong"
+grep -q 'FIXTURE-SAS-SERIAL-0' "$TMP/sas.md" \
+  && ok "SAS serial extracted despite the lowercase 'number' spelling" \
+  || bad "SAS serial blank — the extractor is case-sensitive while the gate is not"
+# The row is only useful if the serial is IN it rather than merely somewhere in
+# the report, so assert the cell, not the document.
+grep -qE '^\| megaraid,0 \|.*FIXTURE-SAS-SERIAL-0' "$TMP/sas.md" \
+  && ok "serial sits in the megaraid,0 row" || bad "serial is in the report but not in its row"
 
 # ---------------------------------------------------------------- summary ----
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$PASS" "$FAIL"

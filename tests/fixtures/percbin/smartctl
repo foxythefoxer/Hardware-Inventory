@@ -3,18 +3,28 @@
 # The device node is captured, not just the controller ID: which node the probe
 # picked is the whole of C-016, and the report is the only place a test can see
 # it. It goes in the serial, which the drive table prints verbatim.
-N=""; DEV=""
+#
+# FR-008: the information section appears ONLY when -i is asked for, which is
+# what smartctl does. This stub used to print identity whatever options it was
+# handed, so it modelled the script's own gate instead of the tool, and the
+# probe passed at every ID here while missing at every ID on hardware. A stub
+# that answers questions it was not asked cannot fail when the caller stops
+# asking them.
+N=""; DEV=""; WANT_I=0
 for a in "$@"; do
   case "$a" in
+    -i)         WANT_I=1;;
     megaraid,*) N="${a#megaraid,}";;
     /dev/*)     DEV="${a#/dev/}";;
   esac
 done
 case "$N" in
 0|1|8|9)
-cat <<C
+[ "$WANT_I" = 1 ] && cat <<C
 Device Model:     ST4000NM0033-9ZM170
 Serial Number:    PROBED-VIA-${DEV}-${N}
+C
+cat <<C
 SMART overall-health self-assessment test result: PASSED
   5 Reallocated_Sector_Ct   0x0033   100   100   010    Pre-fail  Always       -       0
   9 Power_On_Hours          0x0032   078   078   000    Old_age   Always       -       19${N}42

@@ -48,20 +48,20 @@ and an empty **Remaining** is exactly when they get forgotten:
   2026-09-13 and closed five** — FT-004, FT-009, FT-010, FT-012 and FT-013 — so
   FR-004's container gate and R2-002's UPower gate are now measured on real
   hardware rather than inferred, and FR-005's fix is confirmed on the host that
-  filed issue #2. **Still open: FT-008, FT-011, FT-014, FT-015**, plus standing
+  filed issue #2. **FT-008 closed 2026-09-14 with FR-008** — its target-node
+  hypothesis was refuted and the defect it actually surfaced is fixed, so nothing
+  is left to run on it. **Still open: FT-011, FT-014, FT-015**, plus standing
   FT-007. FT-015 remains the one that would change a rating rather than a fix: if
   a real controller numbers its drives from 10 or higher, R2-009 was a HIGH — and
   two rounds have now failed to reach it, because a controller is not enough and
   the vendor CLI has to already be installed.
-- **Two field answers came back as defects rather than answers and are filed as
-  issues #7 and #8, unadjudicated.** #7: the `-d megaraid,N` probe gates on
-  identity fields (`Device Model`, `Product`, `Serial Number`) that its own
-  `smartctl -n standby -H -A` call never requests. #8: the Array slots `emit()`
-  drops a slot on blank `device`+`id` instead of on `status`, silently and at exit
-  `0` — measured dropping five of thirteen slots on a healthy dual-parity array
-  while the counters printed directly above it read `Disks missing: 0`. Both
-  await a verdict; neither is in this queue as accepted work yet, which is
-  exactly the rot this section warns about.
+- ~~**Two field answers came back as defects rather than answers and are filed as
+  issues #7 and #8, unadjudicated.**~~ **Closed 2026-09-14.** Both accepted and
+  implemented as FR-008 and FR-009, below, in v12. This bullet stays, struck
+  through, because the *class* is worth keeping visible: a field test can come
+  back as a defect rather than an answer, and when it does there is nothing in
+  `FIELD-TESTS.md` to hold it — it becomes an issue, and issues are only tracked
+  here once adjudicated. These two sat for a day in exactly that gap.
 
 **An unadjudicated review round rots the same way this queue does, and has less
 holding it up** — a queue item is at least visible in one line here, while a
@@ -89,6 +89,23 @@ after.
 
 Verified against the file and covered by `tests/run.sh` where testable.
 
+- **FR-008** — `-i` added to the `-d megaraid,N` probe's `smartctl` call, which
+  gated on identity fields that `-H -A` does not produce, so a healthy eight-drive
+  array was reported as *"No drives answered"*. Issue #7. The SCSI/SAS serial
+  extractor is case-folded with it — the 7.5 binary prints `Serial number:` for
+  SAS and `Serial Number:` for ATA and NVMe, so a SAS drive cleared the gate on
+  `Product:` and landed a blank serial. **The stubs were the real hole and are
+  fixed at the source**: both megaraid stubs printed identity whatever options
+  they were handed, modelling the gate rather than the tool, so T6 and T21 now
+  fail if the flag is dropped again. T24 is new for the SAS spelling. v12.
+- **FR-009** — the Array slots `emit()` guard keyed on `status == "DISK_NP"`
+  instead of on blank `device`+`id`, which dropped five of thirteen slots on a
+  healthy dual-parity array while the counters directly above read
+  `Disks missing: 0`. Issue #8. Matching one status exactly is the design: any
+  other state now renders rather than vanishing. The fixture gained both a slot
+  that must stay suppressed and a lost slot that must render, because an
+  assertion on either alone passes against a guard that drops everything or one
+  that drops nothing. v12.
 - **FR-004** — manufacturer, model, motherboard and BIOS filled from
   `/sys/devices/virtual/dmi/id/` when `dmidecode` is absent or unprivileged, so
   `model:` is no longer null on every unprivileged run with the value sitting in

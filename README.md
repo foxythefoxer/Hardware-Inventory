@@ -212,7 +212,7 @@ Docker · Failed systemd units · Collection warnings (only when something faile
 ### Version
 
 `collector:` is the version a vault files the report under; the opening comment
-fence carries it too, as `collector=hw-inventory.sh/v11` — the copy a parser
+fence carries it too, as `collector=hw-inventory.sh/v12` — the copy a parser
 reads before it has parsed anything. It moves when the emitted report changes
 for some class of host, and only once per state the world has seen. Every
 released version is also a git tag that never moves, so `main` between releases
