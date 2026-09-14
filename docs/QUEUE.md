@@ -44,11 +44,24 @@ and an empty **Remaining** is exactly when they get forgotten:
 - [`PRIOR-ART.md`](PRIOR-ART.md) holds leads that have never been adjudicated
   either.
 - Open entries in [`FIELD-TESTS.md`](FIELD-TESTS.md) are answers this repo is
-  still waiting on from host classes this machine is not — FT-013 is FR-004's
-  own, and an LXC answering it `0` reopens FR-004 as a defect. **R2 added
-  FT-014 and FT-015**, and FT-015 is the one that would change a rating rather
-  than a fix: if a real controller numbers its drives from 10 or higher, R2-009
-  was a HIGH.
+  still waiting on from host classes this machine is not. **Round two returned
+  2026-09-13 and closed five** — FT-004, FT-009, FT-010, FT-012 and FT-013 — so
+  FR-004's container gate and R2-002's UPower gate are now measured on real
+  hardware rather than inferred, and FR-005's fix is confirmed on the host that
+  filed issue #2. **Still open: FT-008, FT-011, FT-014, FT-015**, plus standing
+  FT-007. FT-015 remains the one that would change a rating rather than a fix: if
+  a real controller numbers its drives from 10 or higher, R2-009 was a HIGH — and
+  two rounds have now failed to reach it, because a controller is not enough and
+  the vendor CLI has to already be installed.
+- **Two field answers came back as defects rather than answers and are filed as
+  issues #7 and #8, unadjudicated.** #7: the `-d megaraid,N` probe gates on
+  identity fields (`Device Model`, `Product`, `Serial Number`) that its own
+  `smartctl -n standby -H -A` call never requests. #8: the Array slots `emit()`
+  drops a slot on blank `device`+`id` instead of on `status`, silently and at exit
+  `0` — measured dropping five of thirteen slots on a healthy dual-parity array
+  while the counters printed directly above it read `Disks missing: 0`. Both
+  await a verdict; neither is in this queue as accepted work yet, which is
+  exactly the rot this section warns about.
 
 **An unadjudicated review round rots the same way this queue does, and has less
 holding it up** — a queue item is at least visible in one line here, while a
@@ -86,8 +99,10 @@ Verified against the file and covered by `tests/run.sh` where testable.
   precautionary — and skipped where `systemd-detect-virt` is absent, since the
   question cannot be answered there. Placeholder strings
   (`To Be Filled By O.E.M.` and friends) read as unknown. T19 holds every
-  condition, all three host shapes. **FT-013** wants the gate confirmed against a
-  real LXC rather than a stubbed `systemd-detect-virt`. v10.
+  condition, all three host shapes. **FT-013 confirmed the gate on a real
+  unprivileged LXC on 2026-09-13** — every DMI row `—`, `model:` null, nothing of
+  the node's identity in the container's report — so this no longer rests on a
+  stubbed `systemd-detect-virt`. v10.
 - **FR-007** — the report wrapped in `<!-- hw-inventory:begin/end -->` comment fences and
   its `## <hostname>` heading replaced with the fixed `## Hardware inventory`, so a
   consumer pasting the report into a hand-written document has a heading-level-agnostic
@@ -153,9 +168,11 @@ Verified against the file and covered by `tests/run.sh` where testable.
   `ident.cfg` awk, which is why the Shares table rendered as one cell per line.
   Issue #2, the first defect a real host found rather than a review. T4's two new
   cases anchor a whole row `^...$` — a `grep` for the first cell passes against
-  the broken output, since the break lands after it. **FT-010** wants v7 confirmed
-  on the host that filed it, and asks the one thing a fixture cannot: whether
-  `/var/local/emhttp/*.ini` really are LF, as the awk table's missing guard assumes.
+  the broken output, since the break lands after it. **FT-010 confirmed it on the
+  host that filed it, 2026-09-13 at `v11`:** exit `0`, not one CR anywhere in the
+  report, and all ten shares present in the table. It also answered the one thing
+  a fixture cannot — `/var/local/emhttp/*.ini` really are LF, so the awk table is
+  correct as shipped without a CR guard.
 - **C-005** — `/etc/os-release` parsed as `KEY=value` instead of sourced, which
   executed it as root on every run. T18 turns on a command substitution in
   `PRETTY_NAME`: sourced it collapses, parsed it stays literal.
@@ -190,9 +207,14 @@ Verified against the file and covered by `tests/run.sh` where testable.
   legible panel model from a real eDP panel, no empty rows and no control
   characters, with a trailing padding space that is **deliberately not trimmed**
   (it renders identically inside a table cell, and the section already says the
-  fields are not separated). Still open on FT-004: whether the section survives an
-  *unprivileged* run on a distribution whose EDID files may not be world-readable
-  — only the root run was made.
+  fields are not separated). **FT-004 closed on 2026-09-13**: the section appears
+  on an *unprivileged* run, so the EDID files are world-readable on that
+  distribution and the root-only case does not arise there — and the fallback
+  recovers a legible make and model from a second vendor's EDID (an external DP
+  monitor) as well as from the laptop's own panel. One publishing note came with
+  it: an external monitor's row carries an unlabelled **serial number** ahead of
+  the model, since without a parser the descriptor bytes cannot be told apart, so
+  the Displays section must never be pasted into this repo.
 - **FR-002** — UPS detection, sysfs `idVendor` as the primary signal, with
   apcupsd config, `apcaccess`, UPower and `power_supply` layered on top of it.
   T16 covers both directions, and the negative half runs under T8's stripped

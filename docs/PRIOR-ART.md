@@ -131,10 +131,15 @@ tests at all.
   Array slots table entirely — no row, no warning, exit `0`. A host with a
   kicked-out parity disk would read as a host that has no parity slot, which is
   the exact failure the exit-code contract exists to prevent.
-- **Why this is a field test and not yet a bug:** whether the case is reachable
-  depends on whether `emhttp` retains `id=` for a disk it has disabled. If it
-  does, `id != ""`, the guard passes, and the row renders correctly with a `—`
-  device. That question cannot be answered on this host class — **FT-009**.
+- ~~**Why this is a field test and not yet a bug:**~~ **Answered, and it is a bug.
+  FT-009, 2026-09-13.** `emhttp` does *not* retain `id=` for a slot with no disk
+  in it — it blanks `device` and `id` both. Measured on an Unraid host with a
+  healthy dual-parity array: five slots came back `status=DISK_NP` with both
+  fields empty and the guard dropped every one, **five of thirteen slots gone at
+  exit `0` with no warning, while the `Disks missing: 0` counter printed directly
+  above the table.** So the drop is reachable on an ordinary array and does not
+  need a kicked-out parity disk to reach it. Filed as issue **#8** and awaiting a
+  verdict; the guard's intent is sound and it is keyed on the wrong field.
 - **One non-finding, recorded so it is not "fixed":** their fixtures use
   unquoted `[parity]` section headers where ours uses `["parity"]`. The parser's
   `gsub(/[\["\]]/,"",sec)` strips both. Do not change either file to match the

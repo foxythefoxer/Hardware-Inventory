@@ -30,6 +30,23 @@ came back decided the design and no measurement of the missing half could have
 changed the verdict. Ask what the answer is *for* before asking for the rest of
 it; an entry kept open at 90% costs someone a trip to a machine for nothing.
 
+**Round two came back on 2026-09-13, collected against `v11` — the tip of `main`,
+so there is no version gap to judge these answers across.** Five entries closed,
+two re-checks came back still-unanswerable for the same reason as last time, one
+census came back partial, and **eight entries were found defective as written**.
+Three of those are the serious kind: the instruction could not produce the answer
+it asked for, and in FT-012's case the entry's own **Send back** would have
+recorded the exact opposite of the truth — an argument for deleting a gate that
+works. Two answers surfaced defects rather than answers and were filed as issues
+#7 and #8, per this file's own rule.
+
+The lesson round two adds to round one's is one level up from the precondition
+rule: **an entry that measures a gated code path must ask for the ungated call
+as well, and must state its pass criterion as an outcome rather than as the one
+branch the filer had in mind.** Both rules are below. FT-012 and FT-013 are the
+worked examples, and FT-012 is now the second entry here to have been defective
+in two different ways across two rounds.
+
 ---
 
 ## Filing a request (the session)
@@ -55,6 +72,32 @@ directions are the same instruction — **state what must be true for the answer
 mean anything, and put it in the `Run` block as its own command**, not in prose an
 operator reads after the fact. A wrong answer from a host class this repo cannot
 reach is not correctable here; nobody can go back and check.
+
+**Ask for the mechanism separately from the gate.** FT-012 asked whether
+`upower -e` activates a stopped `upowerd`, and asked it by running the whole
+script with the daemon stopped — but the shipped gate is `have upower && have
+systemctl && systemctl is-active --quiet upower` sitting *in front of* the
+`upower -e` call, so a stopped daemon guarantees the call is never made. The
+block returns `inactive` twice on every host, at every version since the gate
+landed, whatever the mechanism does. **A gated path needs two measurements, and
+they answer different questions:** run the shipped script to measure what the
+gate prevents, and call the gated tool directly to measure the thing the gate
+exists for. Neither substitutes for the other, and an entry that asks for one
+while interpreting it as the other is the precondition trap one level up — a
+null result for want of a question rather than for want of a thing.
+
+**State the pass criterion as an outcome, not as the branch that produces it.**
+FT-013's pass was "the two counts read `1` and `1`", where the second count was
+a `(needs root)` row that only prints on hosts where `dmidecode` is *absent* —
+so a container that happens to have it installed returns a **false failure**,
+and that entry's **Send back** told the operator to escalate it immediately. What
+actually proved the gate held was the em dashes in the identity rows, which hold
+whichever branch fires. Ask what a pass *looks like*; do not describe the one
+code path you had in mind. The corollary for any entry that counts table rows:
+`row()` emits `| value | value |` but the separator prints as `|---|---|` with no
+space after the pipe, so `grep -c '^| '` counts the header and the data rows and
+**never** the separator — entries + 1 is the pass, and FT-010 shipped a round
+asking for entries + 2, where a clean pass looked like a missing row.
 
 **Ask for an answer, not a report.** "Does a `### UPS` section appear, and do the
 warnings mention `apcaccess`?" is two words back. A pasted report is estate
@@ -90,6 +133,18 @@ frontmatter line are never part of an answer. Where a request needs a value,
 replace it with `<redacted>` — every question here is about whether a row appeared
 and whether the run warned, not what the row said.
 
+**"Not needed" is not the same instruction as "must not be sent", and an entry
+that means the second must say the second.** FT-004 asked whether each display
+row carried a legible make and model, noting that "the strings themselves are not
+needed" — true, and on the one-panel laptop of round one it cost nothing. On a
+host with an external monitor the same row carries an unlabelled **serial
+number**, because without `edid-decode` the descriptor bytes cannot be told
+apart. A caveat phrased as a convenience gets dropped by an operator who cannot
+see why it is there, and the one host class where it matters is the class that was
+never available to the filer. Same for a narrowed glob: FT-010's `file` command
+was narrowed to one representative to stop a share *list* crossing, and the one
+filename that survived was still a share name, which is user content.
+
 Nothing you send is committed verbatim. What lands in this repo is the verdict
 with the machine dropped: *"confirmed on a host running apcupsd — the MODEL and
 STATUS rows populate, no warning"*. Never the model string, never the hostname.
@@ -100,48 +155,6 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
 ---
 
 ## Open
-
-### FT-004 — displays without `edid-decode` (FR-001, fallback)
-
-- **Needs:** a host with a monitor attached and `edid-decode` **not** installed.
-- **Why not here:** `edid-decode` is installed on the development host, so the
-  `strings` fallback only ever runs against the committed 128-byte fixture. Real
-  EDID blobs from real panels are messier than that fixture.
-- **Run:**
-  ```bash
-  command -v edid-decode || echo "edid-decode absent — good, this is the test"
-  bash hw-inventory.sh > "$HOME/hw.md"
-  sed -n '/^### Displays/,/^###[^#]/p' "$HOME/hw.md"
-  ```
-- **Run as:** unprivileged first. If the Displays section is missing entirely as
-  an ordinary user, re-run with `sudo` — a section that appears only under root
-  means the EDID files are not world-readable on that distribution, which is a
-  finding in itself and not what this entry set out to ask.
-- **Send back:** whether each connector row carries a recognisable make and model
-  (yes/no per row is enough — the strings themselves are not needed), and whether
-  any row came out empty or full of control characters.
-- **The fallback's quality is answered, 2026-09-09** on a Fedora 44 KDE laptop
-  with one internal eDP panel, `v7`, **root run**. Precondition confirmed first:
-  `command -v edid-decode` found nothing, so the `strings` path is what ran. The
-  one connector row carries a legible panel model — not a raw `strings` dump — no
-  row was empty, and no control characters appeared. So the fallback survives a
-  real panel's EDID, which the committed 128-byte fixture could not establish.
-  - One artefact, and the verdict on it: a **trailing padding space** on the model
-    value. That is an EDID descriptor artefact carried through by design — the
-    fallback's whole contract is that it does not separate the fields, and the
-    report says so in the section. It lands inside a Markdown table cell where it
-    renders identically either way, so **it is not being trimmed**: a `sed` to
-    strip it would be a change to a collector to alter nothing a reader can see.
-    Recorded here so the next session does not rediscover it as a bug.
-- **Still open: the unprivileged run, which is the only thing left.** The entry
-  asks for unprivileged *first* precisely because a section that appears only
-  under root means the EDID files are not world-readable on that distribution.
-  Only the root run was made, so that is untested and this answer is **not**
-  evidence that EDID is world-readable there. One command settles it, and the
-  section either appears or it does not:
-  ```bash
-  bash hw-inventory.sh | grep -c '^### Displays'
-  ```
 
 ### FT-008 — the megaraid probe target, on a host with a controller (C-016)
 
@@ -165,9 +178,10 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
   unprivileged run skips it entirely, so a non-root answer says nothing. The
   `lsblk` line needs no privilege.
 - **Send back:** the `TRAN` values only (`NAME` is not wanted — "one usb, three
-  sas, one nvme" is the whole answer), the megaraid row count, and whether the
-  "No drives answered" line is present. A count above zero with that line absent
-  is the pass.
+  sas, one nvme" is the whole answer, and **an empty `TRAN` is a valid value, not
+  a failed command** — see the correction below), the megaraid row count, and
+  whether the "No drives answered" line is present. A count above zero with that
+  line absent is the pass.
 
 **Now a measured fail, not a hypothetical — raised in priority, 2026-09-09.** This
 entry was not run, but a `v7` root report collected for FT-007 on a qualifying
@@ -211,120 +225,51 @@ smartctl --scan | head -3                           # what smartctl proposes
 # Does ID 0 answer on smartctl's node but not on the probe's?
 MRTGT=$(lsblk -dn -P -o NAME,TYPE,TRAN | grep -Ev 'NAME="nvme|TRAN="(usb|nvme)"' \
   | sed -n 's/^NAME="\([^"]*\)".*/\1/p' | head -1); echo "probe would pick: $MRTGT"
-smartctl -d megaraid,0 "/dev/$MRTGT" | grep -cE '^(Device Model|Product|Serial Number):'
-smartctl -d megaraid,0 /dev/bus/0    | grep -cE '^(Device Model|Product|Serial Number):'
+# `-i` is not optional: without an operating-mode option smartctl only OPENS the
+# device and prints "Use 'smartctl -a' ...", so both counts read 0 on a working
+# controller and the pair stops discriminating anything (correction, round two).
+smartctl -i -d megaraid,0 "/dev/$MRTGT" | grep -cE '^(Device Model|Product|Serial Number):'
+smartctl -i -d megaraid,0 /dev/bus/0    | grep -cE '^(Device Model|Product|Serial Number):'
 ```
 
-**Send back:** the `TRAN` values (no `NAME`s — "one sas, one nvme" is the answer),
-the `--scan` lines with any serials or WWNs cut, and the two counts. `0` then
-non-zero confirms hypothesis 3 and makes this a script bug; both `0` means the
-passthrough is refusing this caller entirely and the cause is elsewhere. The
-likely fix if it is 3 — deriving the target from `smartctl --scan`, which already
-proposes the right node — is not being written until this comes back, because it
-would replace a working code path on a guess.
+**Send back:** the `TRAN` values (no `NAME`s — "one sas, one nvme" is the answer,
+and two blanks is also an answer), the `--scan` lines with any serials or WWNs
+cut, and the two counts. `0` then non-zero confirms hypothesis 3 and makes this a
+script bug; both `0` means the passthrough is refusing this caller entirely and
+the cause is elsewhere. The likely fix if it is 3 — deriving the target from
+`smartctl --scan`, which already proposes the right node — is not being written
+until this comes back, because it would replace a working code path on a guess.
 
-### FT-009 — does `emhttp` keep `id=` for a slot with no disk in it? (PA-005)
+**Hypothesis 3 is refuted, 2026-09-13, `v11` — and the finding went to issue #7.**
+The measurement and the diagnosis are on the issue; it awaits a verdict there
+rather than here, so **this entry stays open until that lands** and whoever runs
+it next runs the text above. What belongs here is that the target-node
+hypothesis this entry was built to test is **wrong**: on that host the
+passthrough works from every node tried. All three forms — `-d megaraid,0` on
+the probe's own target, on `/dev/bus/0`, and `-d sat+megaraid,0` — return "ATA
+device successfully opened" at exit `0`, and `--scan` enumerates all eight
+drives. The probe is not picking the wrong device.
 
-- **Needs:** any Unraid host with a configured array. It does **not** need a
-  degraded array — the interesting slot is an *unassigned* one, and a host with
-  single parity already has an empty `parity2` slot if emhttp writes sections
-  for unassigned slots at all. That is half the question.
-- **Why not here:** no Unraid. The Array slots table is built by the one awk
-  block in the script, and its `emit()` returns early when `device` and `id` are
-  **both** empty. Measured on 2026-09-08 against a synthetic slot with both
-  empty: the row is dropped silently — no row, no warning, exit `0`. A host
-  whose parity disk had been kicked out would then read as a host that has no
-  parity slot, which is precisely the reading the exit-code contract exists to
-  prevent. Whether that is reachable turns on whether emhttp retains the `id=`
-  of a disk it has disabled or lost. If it does, `id != ""`, the guard passes,
-  and the row renders correctly with a `—` in the Device column — no bug, and
-  the fixture just gains a case. If it does not, the drop is real.
-  An independent parser's tests
-  ([ruaan-deysel/unraid-management-agent](https://github.com/ruaan-deysel/unraid-management-agent),
-  `daemon/services/collectors/array_test.go`) enumerate `DISK_NP`, `DISK_DSBL`
-  and `DISK_NP_DSBL` with `device=""`, but carry no `id` field either way, so
-  they do not settle it. See [`PRIOR-ART.md`](PRIOR-ART.md) PA-005.
-- **Run:**
-  ```bash
-  awk -F= '
-    /^\[/ { s=$0; gsub(/[\["\]]/,"",s); next }
-    /^(status|device|id)=/ {
-      v=$0; sub(/^[^=]*=/,"",v); gsub(/"/,"",v)
-      if ($1=="status") printf "%s status=%s\n", s, v
-      else printf "%s %s=%s\n", s, $1, (v==""?"EMPTY":"present")
-    }
-  ' /var/local/emhttp/disks.ini
-  grep -c '^\[' /var/local/emhttp/disks.ini
-  bash hw-inventory.sh > "$HOME/hw.md"; echo "exit=$?"
-  sed -n '/^#### Array slots/,/^_Slot names/p' "$HOME/hw.md" | grep -c '^| '
-  ```
-- **Run as:** one run is enough — Unraid's console is root, and nothing in this
-  section is root-gated anyway. If you happen to have a non-root shell, say
-  whether `/var/local/emhttp/disks.ini` is readable from it; that is a bonus
-  answer, not the question.
-- **Send back:** the first command's output **verbatim — it is already safe**,
-  which is why it is shaped that way: slot names are Unraid roles (`parity`,
-  `disk1`, `cache`, `flash`), status values are emhttp's own vocabulary, and
-  `device` and `id` are reduced to `EMPTY`/`present` so no serial or node name
-  leaves the host. Then the two counts and the exit code. The table count
-  includes its header row, so **sections + 1** is the pass; anything lower means
-  a slot was dropped, and the first command says which.
-- **Answerable, and expected: 2026-09-09.** An estate has the host class (Unraid,
-  configured array, single parity) and this was out of round one's scope only
-  because the round was planned from a revision of this file that predated the
-  entry. Nothing is blocking it — do not read its age as unanswerability.
-
-### FT-010 — does the fix actually render the Shares table on the host that broke? (FR-005)
-
-- **Needs:** the Unraid host that filed issue #2, running current `main`.
-- **Why not here:** no flash device. FR-005 was reproduced and fixed against a
-  CRLF fixture — the corruption reproduced byte-identically to the issue, and
-  reverting the fix turns T4's two new cases red — but a fixture is a model of
-  the file, not the file. What it cannot rule out is a *second* DOS-formatted
-  input in that section that this repo has no sample of: `disks.ini` and
-  `var.ini` are assumed LF because `/var/local/emhttp` is tmpfs, and the awk
-  table that reads them carries no CR guard on that assumption.
-- **Run:**
-  ```bash
-  git -C /opt/hw-inventory fetch --tags && git -C /opt/hw-inventory checkout main
-  bash /opt/hw-inventory/hw-inventory.sh > "$HOME/hw.md"; echo "exit=$?"
-  # Any CR left anywhere in the report, and where:
-  grep -n $'\r' "$HOME/hw.md" | cut -d: -f1 | tr '\n' ' '; echo "cr-lines-above"
-  # Do the two tables have the same number of rows as they have entries?
-  sed -n '/^#### Shares/,/^_.shareUseCache/p' "$HOME/hw.md" | grep -c '^| '
-  ls /boot/config/shares/*.cfg | wc -l
-  # And are the source files CRLF as assumed? One representative share, not the
-  # glob: `shares/*.cfg` expands to one path per configured share, and share
-  # names are user content.
-  file "$(ls /boot/config/shares/*.cfg | head -1)" /boot/config/ident.cfg /var/local/emhttp/*.ini \
-    | sed 's#.*/##'
-  ```
-- **Run as:** one run, root — Unraid's console is root and this section is not
-  root-gated either way.
-- **Send back:** four short things, no report. (1) The exit code. (2) The
-  `cr-lines-above` list — **empty is the pass**. (3) The two counts: shares + 2
-  (header and separator) should equal the row count. (4) The `file` output,
-  which is the part a fixture cannot answer — it says whether the `.ini` files
-  really are LF, or whether the awk table needs the guard too. **Only the last
-  of the four is safe to paste as-is**, and only in the narrowed form above; the
-  original glob would have published a share list, which is why the command
-  changed rather than the caveat.
-- **The `.ini` assumption is answered, and it holds: 2026-09-09**, live `file` run
-  on an Unraid host. `/boot/config/shares/*.cfg` and `/boot/config/ident.cfg` are
-  **ASCII text with CRLF line terminators**; every `/var/local/emhttp/*.ini` is
-  **ASCII text with no CRLF** (one empty, one flagged "very long lines", neither
-  with a CR). So `/var/local/emhttp` is not the CRLF flash device that Shares and
-  the flash-identity line read from, and **the Array slots `awk` block is correct
-  as shipped without a CR-strip guard** — the second DOS-formatted input this
-  entry was opened to rule out does not exist on this host.
-- **Still open: the rest of the entry, which is its headline question.** The
-  answer above came from a `file` run alone — the script was never run, so there
-  is no exit code, no `cr-lines-above` list and no row-count comparison, and
-  **whether the shipped fix actually renders the Shares table on the host that
-  filed issue #2 remains unconfirmed.** That is the confirmation the fixture
-  cannot give. Re-target it at current `main` rather than `v7`: the Shares,
-  `ident.cfg` and `disks.ini` parsers are byte-identical from `v7` through `v9`,
-  so checking out an old tag buys nothing.
+- **Correction, and it is why the refutation nearly did not happen: the
+  discriminating pair did not discriminate.** Both lines ran `smartctl -d
+  megaraid,0 <node>` with no operating-mode option, so smartctl only opens the
+  device and prints "Use 'smartctl -a' ... to print SMART information" — **both
+  counts come back `0` on a perfectly working controller**, for want of a question
+  rather than for want of a drive. This entry read both-`0` as "the passthrough is
+  refusing this caller entirely and the cause is elsewhere", which on this
+  evidence would have been a false negative pointing away from the real defect.
+  `-i` is now in both lines. It was caught only because the operator dumped the
+  full output instead of trusting the count.
+- **Correction: the `TRAN` example read as an expectation.** Both disks on that
+  host report **empty** transport and there is no NVMe at all. Empty `TRAN` is
+  normal for controller-backed virtual disks — it is exactly what the probe's own
+  filter treats as eligible — but an operator who gets two blanks where the entry
+  showed "one sas, one nvme" may reasonably conclude the command failed. Both
+  **Send back** lines now say so.
+- One secondary observation, not worth an entry of its own: `-n standby` is inert
+  through that controller, which answers "CHECK POWER MODE not implemented,
+  ignoring -n option". Not a defect — the standby guard simply does nothing on
+  that path.
 
 ### FT-011 — does the RAID CLI write a log, and does it take `nolog`? (R2-001)
 
@@ -370,73 +315,12 @@ would replace a working code path on a guess.
   there.** R2-001 stays shipped on vendor documentation until an estate has both, and that
   is an acceptable resting place: the failure mode if some version rejects `nolog` is an
   empty RAID section that warns, not a violation.
-
-### FT-012 — does `upower -e` start the daemon it queries? (R2-002)
-
-- **Needs:** a host with `upower` installed, systemd, a system bus, and `upowerd`
-  **stopped**. A headless server or VM is the likely class; a desktop has it running.
-- **Why not here:** `upowerd` runs on the development host, so the activation is inferred
-  from UPower's D-Bus service file rather than measured. R2-002 already gated the probe —
-  the gate is safe whichever way this comes back — so this confirms the mechanism for the
-  record, and says whether the gate could ever be dropped again.
-- **Run:**
-  ```bash
-  # Precondition, and the test is VOID without it: `is-active` answers `inactive`
-  # for a unit that does not exist, so an absent upower is indistinguishable from
-  # a stopped one. Both must print something before the rest means anything.
-  command -v upower || echo "upower ABSENT — stop here, this host cannot answer it"
-  systemctl list-unit-files 'upower*' | grep -c upower
-  systemctl is-active upower; echo "--- before ---"
-  bash hw-inventory.sh >/dev/null 2>&1
-  systemctl is-active upower; echo "--- after ---"
-  ```
-  If they differ, stop the daemon again (`sudo systemctl stop upower`) and re-run with the
-  v8 tag checked out to confirm it is the script and not something else on the host.
-- **Run as:** unprivileged is enough and is the more honest test — nothing in the UPS
-  section is root-gated, and D-Bus activation does not need root.
-- **Send back:** the precondition result, then the two words. `inactive` then `active` means
-  the finding is confirmed and the gate is load-bearing; `inactive` twice **with upower
-  installed** means v8 activated nothing on this version and the gate is cheap insurance
-  rather than a fix. Either answer is useful and neither needs a report.
-- **Precondition added 2026-09-09, and this entry was defective without it.** A headless
-  server was tried and returned `command -v upower` → nothing, `systemctl is-active upower`
-  → `inactive`. Read against the original **Send back**, `inactive` twice would have been
-  logged as "v8 activated nothing on this version" when the truth was that **the tool is not
-  installed and nothing was activatable** — the entry would have manufactured a measurement
-  out of an absence. That is FT-004's precondition, inverted: FT-004 must confirm
-  `edid-decode` is *missing* before its answer means anything, and this one must confirm
-  `upower` is *present*. Caught by the operator running it; a host class this repo cannot
-  reach is exactly where an ambiguous instruction becomes a false record.
-
-### FT-013 — does the shipped container gate actually hold in an LXC? (FR-004)
-
-- **Needs:** an unprivileged Proxmox LXC. The same host class that answered
-  FT-006.
-- **Why not here:** this machine is never a container, so the gate is exercised
-  only against a stubbed `systemd-detect-virt` (T19). The stub proves the branch
-  is wired to the right answer; it cannot prove the real tool gives that answer
-  under an unprivileged LXC's PID namespace. FT-006 established the *conditions*
-  that make the gate necessary — populated DMI, failing `dmidecode` — and this
-  asks the one thing left: that the shipped code skips.
-- **Run:**
-  ```bash
-  systemd-detect-virt -c; echo "detect-virt -c exit=$?"   # precondition
-  bash hw-inventory.sh > "$HOME/hw.md"
-  grep -c '^model: null' "$HOME/hw.md"
-  grep -c '^| Manufacturer / model | (needs root' "$HOME/hw.md"
-  ```
-  If the first line does not print a container type and exit `0`, stop — the
-  gate cannot be tested on a host whose own tooling says it is not a container,
-  and the answer would be about `systemd-detect-virt`, not about this script.
-- **Run as:** unprivileged. Root inside an unprivileged LXC is the same case for
-  this purpose (`dmidecode` fails there either way), so one run settles it.
-- **Send back:** the two counts — `1` and `1` is the pass. A `0` on either means
-  the container filled in the Proxmox node's identity as its own, which is the
-  defect this gate exists to prevent and is worth an immediate `/adjudicate`.
-- **Also worth one line, if the LXC has no `systemd-detect-virt` at all:**
-  `command -v systemd-detect-virt || echo absent`. The fallback is skipped
-  outright in that case by design — a host that cannot answer the question does
-  not get the fallback — and the same two counts should still read `1` and `1`.
+- **Re-checked 2026-09-13 and still unanswerable there.** `command -v perccli64 storcli64
+  MegaCli64` returns nothing on the only host in that estate with a real controller, exactly
+  as in round one, and the `v11` report's RAID section says so in its own words: *"No vendor
+  CLI found."* Recorded as a re-check rather than as a new answer because the blocker is a
+  fact about that estate today, not a permanent exclusion — **two negative rounds are not
+  unanswerability, and this entry is not abandoned.**
 
 ### FT-014 — does the `findmnt` fallback populate the table on util-linux 2.23? (R2-008)
 
@@ -463,6 +347,17 @@ would replace a working code path on a guess.
   there after all and the finding's premise is wrong on this distribution, which is
   worth knowing and needs no report. **No report, and no mount table** — the counts
   are the answer; a mount table is estate topology.
+- **A partial census, 2026-09-13 — data, not a verdict.** Two hosts measured, both far above
+  the threshold: util-linux **2.41** on a Dell PowerEdge and **2.41.3** on a Fedora 44
+  laptop. Two other hosts in that round closed their sittings without recording theirs, so
+  the census is incomplete and is reported as incomplete rather than rounded to "this estate
+  cannot answer it".
+- **The two missing versions are not being chased, and that is the verdict on the census.**
+  This entry needs util-linux *below* 2.28 — RHEL/CentOS 7 or equivalent — and two more
+  numbers above 2.28 cannot turn an incomplete "nothing here is old enough" into an answer.
+  Completing the set would cost someone two trips to two machines to leave this entry exactly
+  where it sits, which is the thing the header warns against. The two measured versions are
+  recorded so the next round does not re-measure the same hosts.
 
 ### FT-015 — what device ID does a real controller number its drives from? (R2-009)
 
@@ -487,6 +382,10 @@ would replace a working code path on a guess.
   higher, this array was invisible before v11 and the finding was HIGH.
 - **Worth pairing with FT-011**, which needs the same binary on the same host and
   asks for one directory listing.
+- **Re-checked 2026-09-13 with FT-011 and blocked by the same fact:** no `perccli64`,
+  `storcli64` or `MegaCli64` on the one host in that estate with a real controller. R2-009
+  stays MEDIUM on the stub, and the entry stays open rather than abandoned — it needs a host
+  where the controller *and* its CLI are both already present.
 
 ### FT-007 — the root half, on hardware that has any (standing)
 
@@ -531,6 +430,30 @@ would replace a working code path on a guess.
     controller, so this class of failure is invisible to it by construction.
   - Counts are not comparable forward: `tests/run.sh` gained ~90 lines between
     `v7` and `v9`, and 158 is the current figure on the development host class.
+- **Re-run at `v11`, 2026-09-13, same host class** — a Dell PowerEdge, **BMC yes**
+  (iDRAC), **hardware RAID yes** (LSI MegaRAID SAS 2208). The resident checkout
+  moved `v7` → `v11` cleanly and `git describe --tags` confirmed the pin before
+  anything ran.
+  - Suite: **166 passed, 0 failed.** This is **the first real-hardware run since
+    CI-005's fix, and the machine that produced that failure now agrees with CI** —
+    which is the check that the fix was a fix and not a test tuned to a runner.
+  - Script exit `1`, **13** sections — the same count the `v7` run gave, so no
+    section was gained or lost between the tags on that host. Warnings block naming
+    exactly one collector: `pct list` empty as root, the same known local condition
+    round one reported, tracked on the operator's side and not a script defect.
+  - **166 is not a shortfall against this host's 210, and the gap is measured,
+    not assumed.** The suite `SKIP`s whole blocks for tools the runner lacks —
+    ShellCheck (T7), the two `jq`-gated hook tests, and T14's half that needs the
+    `private-patterns.local` from the README setup step a resident checkout has
+    probably never run. Measured here at `v11` by mirroring every tool *except*
+    `shellcheck` and `jq` onto a clean `PATH`: **210 passed with them, 159 passed
+    without, 0 failed either way** — so those two binaries alone gate 51
+    assertions. A field answer's pass/fail line is the signal; **its count is a
+    fact about the host's toolchain**, and counts are comparable neither forward
+    across tags nor sideways across hosts. Say "0 failed", not "166".
+  - **Nothing to close, by design.** Two outings, two findings it alone could
+    produce: CI-005 in round one, and in round two the confirmation that no runner
+    could give.
   - **Does not close.** It closes by its own terms, never.
 
 ---
@@ -550,6 +473,18 @@ invocations (R2-001) and the UPower branch (R2-002) moved, and no answer below
 rests on either. **Nothing here needs re-running at `v9`.** This file also did
 not change between those tags except to gain FT-011 and FT-012, so every answer
 was collected against the entry text as it still reads.
+
+**Round two, returned 2026-09-13 from the same estate, collected against `v11` —
+which was the tip of `main` at the time and still is.** The pin, the code that
+ran and the code in this repo are one commit (`c11ea81`), re-fetched before the
+return was written, so round one's version-gap argument has no round-two
+equivalent and nothing below needs re-running. That is also what let FT-010
+satisfy its own "re-target at current `main`" instruction without a second
+checkout. Every `Run` block was executed as written first; where a block could
+not produce its own answer, what actually settles the question was run second and
+**both results were reported, because the difference between them is the
+correction.** Four entries below therefore carry a verdict *and* a defect in the
+instruction that produced it.
 
 ### FT-001 — answered. UPS rows from a live daemon, and the predicted failure did not happen.
 
@@ -624,6 +559,61 @@ display test**, and a row in a guest report is synthetic rather than a monitor
 someone forgot about. No fixture: the connector parses identically to the
 committed EDID fixtures, so there is nothing here a test could hold still.
 
+### FT-004 — answered, both halves. The Displays section appears unprivileged, and the fallback survives a second vendor's EDID.
+
+Round one answered the fallback's *quality* from a root run on a Fedora 44 KDE
+laptop with one internal eDP panel (`v7`). Round two closed the half that was
+left, on the same host class with an external DisplayPort monitor attached:
+`v11`, **unprivileged, no sudo anywhere in the test**. Precondition confirmed
+both times — `command -v edid-decode` found nothing, so the `strings` path is
+what ran.
+
+- `grep -c '^### Displays'` → **1**. **The section appears without root**, so the
+  EDID files are world-readable on that distribution and the root-only case this
+  entry was opened to rule out does not arise there. Exit `0`, with no
+  `## Collection warnings` section at all.
+  - **One narrowing on the reasoning that came with that**, because it would
+    misinform the next entry otherwise: the return explained the clean exit as
+    "an unprivileged run never attempts the root-gated collectors and so has
+    nothing to warn about". The first half is right and the second does not
+    follow. Most of the script's warn sites are not root-gated at all — `lscpu`,
+    `lsblk`, `df`, `findmnt`, `ip` and `lspci` each warn when present, permitted
+    and empty, and CI-004 exists precisely because an unprivileged `lspci` that
+    enumerates nothing warns *correctly* and once failed a test about Docker.
+    **Exit `0` with no warnings block is a fact about that laptop, not a property
+    of unprivileged runs.** It is still the right answer here; only the
+    generalisation is wrong.
+- **Two connector rows**, one internal eDP and one external DP, each carrying a
+  recognisable make and model; no empty row and no control characters. Round one
+  proved the fallback against one panel, which could not establish that it
+  survives a *second* vendor's descriptor layout. It does.
+
+The **trailing padding space** on the eDP model value is round one's artefact and
+the not-a-bug verdict on it stands unchanged: it lands inside a Markdown table
+cell where it renders identically either way, and the fallback's contract is that
+it does not separate the descriptor fields.
+
+**A reading note, because the count and the rows prove different things.** The
+heading prints whenever any connector yields EDID bytes, and a row is emitted as
+`(EDID present, not parsed)` even where the parse recovers nothing — so `1`
+proves the unprivileged *read* succeeded, which is this entry's actual question,
+but would not by itself have shown the fallback recovered anything. Both halves
+came back clean here, so it closes either way; recorded so a later round does not
+read the count as proof of the rows.
+
+**Correction, and this one is a publishing matter: the `Send back` asked for less
+care than the data needs.** The external monitor's row carries a **serial number**
+in its raw text, unlabelled and ahead of the model, because without a parser the
+descriptor bytes cannot be told apart — the script says exactly that in the
+section's own footnote. Round one's single eDP row carried no serial, so this was
+the first run where the Displays section is genuinely unsafe to paste. "The
+strings themselves are not needed" was doing real work by accident; **an operator
+with one internal panel would never discover why**, which is how a caveat that
+holds by luck becomes a leak on the next host. Were this entry still open the
+line would now read *must not be sent*; it is closing, so the correction is
+recorded here instead — and the rule it generalises to is in *Never send the
+whole report* above.
+
 ### FT-005 — answered. The `zd[0-9]` exclusion holds against real zvols.
 
 A Proxmox host with `local-zfs` and both guest disks on it: `lsblk` shows `zd0`,
@@ -669,3 +659,206 @@ genuinely left open — whether the container sees the host's DMI *values* or
 synthetic ones — because the verdict is "skip" either way: the host's values are
 wrong, and synthetic ones are meaningless. **No further measurement can move this,
 which is why it closes rather than staying open at 90%.**
+
+### FT-009 — answered. `emhttp` blanks both fields, so the silent drop is reachable on a healthy array.
+
+Measured 2026-09-13 on an Unraid host with a configured **dual-parity** array,
+`v11`, one root run — Unraid's console is root, which this entry's **Run as** line
+says is enough.
+
+**`emhttp` does not keep `id=` for a slot with no disk in it: it blanks `device`
+and `id` both.** Five slots came back `status=DISK_NP` with both fields empty and
+`emit()`'s early return fired on every one. So **the drop is reachable on an
+ordinary healthy array**, not only on a degraded one — which is what this entry
+was opened to find out, and it resolves PA-005 in the direction that makes it a
+defect rather than a fixture gap.
+
+- `grep -c '^\['` → **13** sections; the Array slots row count → **9**, i.e.
+  eight slots plus the header against this entry's stated pass of 14. Collector
+  exit **`0`**, no warning, nothing in the report saying five rows are missing.
+- The guard is `if (dev == "" && id == "") return` and it never consults
+  `status`, which is read for display only. The report prints `Disks missing`,
+  `Disks invalid` and `Disks disabled` from `var.ini` immediately above that
+  table, so **a slot dropped this way leaves the report contradicting its own
+  counters.** The guard's intent is right — five `DISK_NP` rows would be noise —
+  and it is keyed on the wrong field.
+- The `parity2` half of the question is moot on this host: dual parity, so
+  `parity2` is populated and there was no empty parity slot to observe.
+
+**Filed as issue #8 rather than returned as a verdict**, which is this file's own
+rule working. How that judgment moved is worth keeping, because the reasoning
+outlasts the outcome: the return was first read as an ordinary answered field
+test on the grounds that the *harmful* case cannot be produced without degrading
+an array. What moved it was the half that does not depend on that case — five of
+thirteen slots dropped on a healthy array while the counters directly above read
+`Disks missing: 0`. **Severity was the thing in doubt; validity never was.**
+
+**The remaining half is unanswerable by construction, not pending.** Whether a
+disk `emhttp` has *lost* — `DISK_DSBL`, `DISK_INVALID` — also comes back with a
+blank `id` cannot be measured on that host, and that is not a host-class gap like
+FT-011 and FT-015: it needs a **fault**, not a host, and no estate should
+manufacture one on a live array to answer a field test. It also cannot change
+anything. The answered half already establishes the drop is reachable, and the
+fix under adjudication in #8 — keying the guard on `status` rather than on
+`device`+`id` — makes `emhttp`'s retention of `id` irrelevant in either
+direction. Same shape as FT-006: no further measurement can move it, so it
+closes rather than sitting open waiting for a degraded array nobody should
+produce.
+
+### FT-010 — answered. The fix renders the Shares table on the host that filed issue #2.
+
+Round one answered the `.ini` half from a `file` run alone. Round two ran the
+script, on the same Unraid host, at `v11` — which is what "re-target at current
+`main`" asked for, since `v11` *is* the tip of `main`. Root, one run, the same
+run that answered FT-009.
+
+- Exit **`0`**. `cr-lines-above` → **empty**: not one CR anywhere in the report.
+- Shares table rows → **11** against **10** configured shares. Every share
+  present and the table renders — **the headline question, and the part a fixture
+  could not answer.** FR-005's fix works on the host that broke.
+- `file` corroborates round one exactly: the representative `.cfg` and
+  `ident.cfg` are `ASCII text, with CRLF line terminators`; every
+  `/var/local/emhttp/*.ini` is plain `ASCII text` (one empty, one flagged for very
+  long lines), none with CRLF. **The Array slots `awk` block is correct as shipped
+  without a CR-strip guard**, and the second DOS-formatted input this entry was
+  opened to rule out does not exist there.
+
+**Correction, arithmetic: the pass was shares + 1, not shares + 2.** `row()`
+emits `| value | value |` while the separator prints as `|---|---|` with no space
+after the pipe, so `grep -c '^| '` counts the header and the data rows and never
+the separator. **11 against 10 is the pass, and as the entry read it looked like a
+row short** — the next operator would have re-run the sitting or filed a bug
+against a working fix. FT-009 states the same arithmetic correctly as sections + 1,
+which is what makes this a slip rather than a misunderstanding. The general form
+is now in *Filing a request* above.
+
+**Correction, publishing: the narrowed `file` glob still published a share name.**
+Round one replaced `shares/*.cfg` with one representative to stop a share *list*
+crossing, and that was the right change — but the filename that survives is still
+a share name, and share names are user content. The operator redacted it; the
+formats were the whole answer and carried it without the name. Noted because the
+same half-fix looks complete to the next reader, and the general form is now in
+*Never send the whole report* above.
+
+### FT-012 — answered. `upower -e` does activate a stopped `upowerd`, and the R2-002 gate is load-bearing.
+
+Measured 2026-09-13 on a Fedora 44 KDE laptop with `upower` installed and a
+graphical session, `v11`, unprivileged apart from the stop and the start.
+Precondition met both halves: `command -v upower` present, and
+`systemctl list-unit-files 'upower*' | grep -c upower` → 1.
+
+**Stopped the daemon, confirmed `inactive`, called `upower -e` directly (exit
+`0`), and `is-active` then read `active`.** Restored and confirmed `active`. So
+R2-002's inference is now a measurement, and **the gate cannot be dropped**:
+removing it reintroduces a query that changes the host it is inventorying.
+Corroboration, since R2-002 rested on reading a service file rather than on a
+measurement: `/usr/share/dbus-1/system-services/org.freedesktop.UPower.service`
+is present there, so the activation path the fix was reasoned from is the one
+that fired.
+
+**The entry's own `Run` block could not have produced that answer, and its `Send
+back` would have recorded the opposite of it.** The shipped gate is `have upower
+&& have systemctl && systemctl is-active --quiet upower` sitting *in front of*
+`upower -e`, so stopping the daemon guarantees the call is never made: the block
+returns `inactive` then `inactive` on every host, at every version since R2-002,
+regardless of what the mechanism does. The operator ran it as written first and
+got exactly that, then ran the direct call. Read against this entry's **Send
+back**, `inactive` twice with `upower` installed meant *"v8 activated nothing on
+this version and the gate is cheap insurance rather than a fix"* — **an argument
+for deleting a gate that works, manufactured by the instruction rather than by
+the host.** Two measurements were wanted and they answer different questions: the
+gated collector run measures the gate's effectiveness (`inactive` twice is a real
+pass worth keeping), and a direct `upower -e` between the two reads measures the
+mechanism the gate exists for (`inactive` then `active` is the confirmation). The
+entry performed the first while interpreting it as the second. The rule is now in
+*Filing a request* above; **this entry is its worked example, and it is the second
+round in a row that FT-012 has been found defective in a new way** — which is the
+argument for that rule being written down rather than remembered.
+
+**The `Needs` line also named the wrong class**, and would have sent the next
+operator on a repeat of round one's void run: no server in that estate has
+`upower` installed at all, which is why round one gained the precondition. The
+answerable class is the inverse — **a desktop with the daemon stopped
+deliberately.**
+
+Two things offered before they were asked for, and neither bears on the answer:
+the machine was on battery with no adapter attached, and D-Bus activation happens
+at bus-connect, *before* any device enumeration — so the result is independent of
+power source and of whether any power device exists at all. That is what makes it
+generalise to the headless hosts the gate actually protects. That host prints no
+`### UPS` section in either run, having no UPS to enumerate.
+
+### FT-013 — answered. The shipped container gate holds in a real unprivileged LXC.
+
+Measured 2026-09-13 on an unprivileged Debian LXC on a Proxmox node — the class
+this entry asked for, and the class that answered FT-006 — reached by `pct exec`,
+i.e. root inside the container, which the **Run as** line names as the same case.
+`v11`. Precondition met: `systemd-detect-virt -c` printed a container type and
+exited `0`.
+
+**Every DMI row in `### Identity` came back `—`: Manufacturer, Model, Service tag
+/ serial, Motherboard, BIOS. Nothing of the node's identity reached the
+container's report**, which is the whole question. `model:` is null, `Platform`
+reads `lxc`, exit `1`, and the warnings block names `dmidecode` and `dmidecode -t
+memory` — both correct for an LXC under the "unknown, not none" contract. FR-004
+ships verified on the class it was gated for.
+
+**What proves the gate held is the em dashes, not the missing row — and the
+stated pass of `1` and `1` was wrong.** `v11` has three identity branches, not
+two: root-with-`dmidecode`, the DMI-sysfs fallback, and the `(needs root)` row.
+`dmidecode` is installed in that container and `pct exec` is root, so the
+**first** branch fired and the `(needs root)` row this entry greps for never
+printed there at all. So the stated pass is branch-dependent and returns a **false
+failure on a container that has `dmidecode` installed**, which is not exotic: it
+arrives as a dependency of ordinary packages.
+
+**Sharpening that diagnosis one step, because it changes which line was at
+fault.** The `(needs root)` row does not appear only where `dmidecode` is absent —
+it appears whenever the root-with-`dmidecode` branch does not fire *and* the sysfs
+fallback does not either. Inside a container the fallback never fires by design,
+so an **unprivileged** run there prints that row even with `dmidecode` installed,
+and the stated pass of `1` and `1` would have been **correct for the run the `Run
+as` line asks for in its first word**. What produced the false failure was the
+same line's second sentence — "root inside an unprivileged LXC is the same case
+for this purpose" — which is true of `dmidecode` failing and false of which
+identity branch renders. **The two lines were individually defensible and
+inconsistent with each other**, which is harder to catch than a plain wrong
+criterion and is the better reason to state a pass as an outcome: an
+outcome-shaped criterion would have survived either reading of `Run as`. Worse, the **Send back** told the operator that a
+`0` meant the container had filed the node's identity as its own and was worth an
+immediate `/adjudicate`. **A manufactured escalation, and the inverse of FT-012's
+defect** — one entry would have hidden a real finding, this one would have
+invented a false one, from the same root cause of describing a code path instead
+of an outcome.
+
+What makes the em dashes conclusive rather than merely consistent: `DMI_SYSFS` is
+populated *above* the identity table, so had the fallback fired, the first branch
+would have printed the node's values into those same five rows. FT-006 already
+established that this container's `/sys/devices/virtual/dmi/id/` is readable and
+populated **with the node's values** — so there was something there to leak, and
+it did not leak.
+
+**The branch-independent criterion, recorded rather than re-run.** The answer is
+already in and no second sitting is wanted; this is for whoever re-asks the
+question on a new container class. A pass is `model:` null **and** no `###
+Identity` row carrying a vendor string — whether that shows as five `—` rows or
+as the single `(needs root)` row depends only on whether `dmidecode` happens to be
+installed, and neither is the defect:
+
+```bash
+bash hw-inventory.sh > "$HOME/hw.md"
+grep -c '^model: null' "$HOME/hw.md"                                   # expect 1
+sed -n '/^### Identity/,/^###[^#]/p' "$HOME/hw.md" \
+  | grep -cE '^\| (Manufacturer|Model|Motherboard|BIOS) \| [^—(]'      # expect 0
+```
+
+The second count excludes both `—` and any `(needs root …)` string, so it reads
+`0` under every branch that has not leaked and non-zero the moment a vendor string
+reaches an identity row. **Checked before being written here, against all three
+branch shapes** — five em dashes, the `(needs root)` row, and a synthetic leak
+where the fallback printed a node's board into those rows: `0`, `0`, `4`. The
+first draft of it ended the `sed` range at `/^$/`, which terminates on the blank
+line directly below the heading and so never reaches the table — it read `0` on
+the leak too, i.e. it was a criterion that passed everything. The range anchor is
+`/^###[^#]/`, the same one FT-004's `Run` block uses, and it also keeps a `Model`
+row in a later section from being counted.

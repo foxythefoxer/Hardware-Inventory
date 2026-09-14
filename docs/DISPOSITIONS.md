@@ -355,8 +355,15 @@ Three decisions the conditions left open, and what settles each:
 Both bugs the conditions predict were reintroduced against the finished code and the
 suite caught each: deleting the container gate turns the four container assertions red,
 and cutting the placeholder list turns two red. Suite **176/0**, baseline 161/0.
-ShellCheck and the root pass are CI's; this host has neither. **Unverified here**: the
-gate against a real LXC rather than a stubbed `systemd-detect-virt` — **FT-013**.
+ShellCheck and the root pass are CI's; this host has neither. ~~**Unverified here**: the
+gate against a real LXC rather than a stubbed `systemd-detect-virt`~~ — **verified on
+2026-09-13 by FT-013**, on an unprivileged Debian LXC on a Proxmox node: every DMI row in
+`### Identity` came back `—`, `model:` is null, and nothing of the node's identity reached
+the container's report. The gate holds on the real tool, not just on the stub. Note for
+anyone reading the numbers: that run had `dmidecode` *installed* in the container and ran
+as root via `pct exec`, so the root-with-`dmidecode` branch fired and the `(needs root)`
+row never printed — **the em dashes are what prove the gate held, not the absence of that
+row**, and FT-013's original pass criterion was wrong about this. The verdict is unchanged.
 
 ### FR-005 — CRLF from the Unraid flash device breaks the Shares table — accepted, done
 
@@ -400,6 +407,13 @@ of this ledger runs on — neither could be made to fail a test:
 - **The same CR strip in the `disks.ini` `esc()`.** Its twin in `row()` has it, which is
   an asymmetry worth a comment rather than a guard: `/var/local/emhttp` is tmpfs and LF.
   `/boot` is the DOS filesystem; that boundary is now stated at `row()`.
+  **Confirmed on the host that filed the issue — FT-010, 2026-09-13 at `v11`.** `file`
+  reports every `/var/local/emhttp/*.ini` as plain ASCII with no CRLF, while
+  `/boot/config/shares/*.cfg` and `ident.cfg` are CRLF — so the tmpfs-versus-DOS boundary
+  this asymmetry rests on is real on a live Unraid host and the `disks.ini` guard stays
+  out. The same run confirmed the fix end to end: exit `0`, not one CR anywhere in the
+  report, and all ten configured shares present in the table. **That is the part a fixture
+  could not answer**, and it closes the field test rather than reopening this verdict.
 
 Both halves tested. `shares/crlf.cfg` and a new `ident.cfg` fixture are CRLF; T4 asserts
 each **whole row on one line**, anchored `^...$`, because a `grep -q '| crlf | no'` passes
@@ -922,7 +936,10 @@ be filled in before filing. 27 findings: 1 CRITICAL, 3 HIGH, 7 MEDIUM, 11 LOW, 5
 (`F-020`, `F-021`, `F-023`, `F-027` — all in the LOW/NITPICK batch below, and in
 [`collectors.md`](../.claude/rules/collectors.md) so they are not re-proposed). Nothing
 from R2 is outstanding; what remains unverified is on host classes this machine is not, and
-is in [`FIELD-TESTS.md`](FIELD-TESTS.md) as FT-011, FT-012, FT-014 and FT-015.
+is in [`FIELD-TESTS.md`](FIELD-TESTS.md) as FT-011, FT-014 and FT-015. **FT-012 came back
+on 2026-09-13 and R2-002 is now measured rather than inferred** — see its entry below; the
+other three were re-checked or partially answered the same day and none of them moves a
+verdict.
 
 ### R2-001 — `perccli`/`storcli` invoked without `nolog` — accepted, done
 
@@ -1010,6 +1027,20 @@ connection to find out.
 
 **Verified by mutation:** the ungated copy fails the stopped-daemon assertion and still
 passes the running-daemon one, so both halves of T16's new pair are load-bearing.
+
+**The activation itself is now measured, not inferred — FT-012, 2026-09-13**, on a Fedora
+44 KDE laptop with the daemon deliberately stopped. `upower -e` called directly against a
+confirmed-`inactive` `upowerd` returned exit `0`, and `systemctl is-active` then read
+`active`; the service file this finding was reasoned from is present on that host, so the
+activation path named above is the one that fired. **So the gate is load-bearing and cannot
+be dropped**: removing it reintroduces a read that changes the host it is inventorying.
+This confirms the finding by measurement where it had rested on inference — it does not
+reopen it, and the verdict is unchanged. Worth knowing that the field entry as written
+could not have produced this: the gate sits in front of `upower -e`, so running the whole
+script with the daemon stopped never makes the call, and the entry's stated reading of that
+null result was "the gate is cheap insurance rather than a fix" — the opposite of the truth.
+It took a direct call to settle, which is why `FIELD-TESTS.md` now carries a rule about
+measuring a gated path and its mechanism separately.
 
 **T10 caught a defect in the fix itself, and the reason is worth keeping.** The gate runs
 in an `if` condition, where only stderr was redirected — so `systemctl`'s stdout went into
