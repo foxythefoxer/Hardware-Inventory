@@ -50,7 +50,10 @@ and an empty **Remaining** is exactly when they get forgotten:
   hardware rather than inferred, and FR-005's fix is confirmed on the host that
   filed issue #2. **FT-008 closed 2026-09-14 with FR-008** — its target-node
   hypothesis was refuted and the defect it actually surfaced is fixed, so nothing
-  is left to run on it. **Still open: FT-011, FT-014, FT-015**, plus standing
+  is left to run on it. **FT-016 and FT-017 are new, filed 2026-09-14 with v12** —
+  they confirm FR-008's and FR-009's fixes on the two host classes that found the
+  defects, which this machine is neither of. **Still open: FT-011, FT-014, FT-015,
+  FT-016, FT-017**, plus standing
   FT-007. FT-015 remains the one that would change a rating rather than a fix: if
   a real controller numbers its drives from 10 or higher, R2-009 was a HIGH — and
   two rounds have now failed to reach it, because a controller is not enough and

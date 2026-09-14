@@ -567,10 +567,14 @@ shellcheck — and both run in CI's root pass; T6's probe half was additionally 
 here against an `is_root() { true; }` copy, the documented workaround, and renders all
 four sparse IDs with C-016's target assertion intact.
 
-**Unverified here, and it does not need a field test to land**: the fix against a real
-LSI controller. The filer measured both halves of the gate on that hardware before filing,
-which is the measurement this entry rests on — `FT-015` still wants a controller numbering
-drives from 10 or higher, and that is R2-009's question, not this one.
+**Unverified here**: the fix against a real LSI controller. The filer measured both halves
+of the gate on that hardware before filing, which is the measurement this entry rests on,
+and it is why this landed rather than waiting. But **the premise is not the product** — the
+gate was one of several things between the call and the rendered table, and the rest have
+never run against a real controller. **`FT-016` asks for the row count, the survival of the
+false sentence, and the dash-serial count**, four numbers and no report. `FT-015` still
+wants a controller numbering drives from 10 or higher, and that is R2-009's question, not
+this one.
 
 v12. It changes the emitted report for every host with a MegaRAID controller, from a false
 claim to a drive table.
@@ -608,7 +612,11 @@ whether a disk emhttp has lost (`DISK_DSBL`, `DISK_INVALID`) also returns a blan
 No such slot exists on the filer's host and producing one means degrading a live array.
 It is **not load-bearing** — the guard was keyed on the wrong field regardless of what the
 disabled states write, and under the new key a lost slot renders whether its `id` is blank
-or not. No field test is filed, because there is no answer that would change the fix.
+or not. **No field test is filed for that half**, because no answer to it would change the
+fix. `FT-017` asks a different and answerable question — whether the shipped table now
+agrees with the counters above it — and asks for the host's **status tally** with it, which
+would be the first list of real Unraid status strings this repo has seen. Every one of them
+other than `DISK_NP` now renders, so that tally is the one thing that could widen the skip.
 
 The fixture gained the two slots that share the condition the old key tested and differ
 only in status: a `DISK_NP` slot that must stay suppressed, and a `DISK_DSBL` slot with

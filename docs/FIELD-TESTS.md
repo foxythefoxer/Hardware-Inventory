@@ -159,6 +159,66 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
 
 ## Open
 
+### FT-016 — does the fixed megaraid probe actually render the drive table? (FR-008)
+
+- **Needs:** the host that filed issue #7 — a MegaRAID/PERC controller with drives
+  behind it, `smartctl` present, run as root. Any host of that class settles it.
+- **Why not here:** no controller, and no root. The fix is confirmed against
+  corrected stubs and against smartctl's own documentation, and the filer measured
+  the *premise* on real hardware — `-i -H -A` matched the gate twice where `-H -A`
+  matched it zero times. **That is not the same as confirming the shipped `v12`
+  renders eight rows.** The gate was one of several things between the call and the
+  table; the rest have never run against a real controller.
+- **Run as:** **root.** The probe is root-gated and there is nothing to see without it.
+- **Run:**
+  ```bash
+  # Confirm the version under test, so this answer is not read across a bump.
+  grep -m1 'collector: hw-inventory.sh' "$HOME/hw-root.md"
+  # The section, counted rather than pasted.
+  sed -n '/#### Physical drive SMART (behind controller)/,/^$/p' "$HOME/hw-root.md" \
+    | grep -c '^| '
+  # Did the false sentence survive?
+  grep -c 'No drives answered' "$HOME/hw-root.md"
+  # Serial column populated, or em dashes? Count rows whose serial cell is a dash.
+  sed -n '/#### Physical drive SMART (behind controller)/,/^$/p' "$HOME/hw-root.md" \
+    | awk -F'|' '/^\| megaraid,/ {if ($4 ~ /^ *— *$/) n++} END {print n+0}'
+  ```
+- **Send back:** four numbers. The row count should be **drives + 1** — the header
+  counts, the `|---|` separator never does. `No drives answered` should be **0**.
+  The dash-serial count should be **0**; if it is not, say whether those drives are
+  SAS, because that is the half FR-008 fixed blind. Nothing else — no report.
+- **What would reopen the verdict:** a row count of 1 (header only) or a surviving
+  "No drives answered" means `-i` was necessary but not sufficient and something
+  else sits between the call and the table. A non-zero dash-serial count on SAS
+  drives means the case-fold missed a spelling.
+
+### FT-017 — does the Unraid slot table now agree with its own counters? (FR-009)
+
+- **Needs:** the Unraid host that filed issue #8, or any Unraid host with at least
+  one empty array slot. Unprivileged is enough — `disks.ini` is world-readable.
+- **Why not here:** no Unraid host, and no array. The fix is deterministic awk
+  covered both ways by the fixture, so this is confirmation rather than a question
+  the design rests on — which is why it is filed as its own entry and not as a
+  blocker on anything.
+- **Run as:** either; **unprivileged** is the cheaper run and answers it.
+- **Run:**
+  ```bash
+  grep -m1 'collector: hw-inventory.sh' "$HOME/hw-user.md"
+  # Slots emhttp knows about, versus slots the table renders.
+  grep -c '^\[' /var/local/emhttp/disks.ini
+  awk -F= '/^status=/ {gsub(/"/,"",$2); print $2}' /var/local/emhttp/disks.ini \
+    | sort | uniq -c
+  sed -n '/#### Array slots/,/^_Slot names/p' "$HOME/hw-user.md" | grep -c '^| '
+  ```
+- **Send back:** the section count, the status tally, and the table row count.
+  **The table should be (sections − DISK_NP count) + 1**, the `+1` being the header.
+  The status tally is the part worth having even on its own: it is the first list
+  of real Unraid status strings this repo has ever seen, and every one of them
+  other than `DISK_NP` now renders.
+- **What would reopen the verdict:** any status other than `DISK_NP` that turns out
+  to mean "slot is empty by configuration" would make the table noisier than before
+  on that host — send the tally and it can be added to the skip.
+
 ### FT-011 — does the RAID CLI write a log, and does it take `nolog`? (R2-001)
 
 - **Needs:** a host with `perccli64` or `storcli64` installed. A controller behind it is
