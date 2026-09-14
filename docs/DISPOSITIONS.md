@@ -500,6 +500,134 @@ read-only banned-verb list (T1), unchanged.
 
 ---
 
+### FR-008 — the `-d megaraid,N` probe gates on identity fields its own call never requests — accepted, done
+
+Issue #7, and the second defect a real host found rather than a review. The probe ran
+`smartctl -n standby -H -A -d megaraid,$n /dev/$MRTGT` and then required one of
+`^Device Model:|^Model Number:|^Product:|^Serial Number:` before counting a hit. None of
+those fields is in `-H -A` output. Every ID was a miss, `hits` stayed `0`, and the section
+printed *"No drives answered `-d megaraid,N`. The controller may be in HBA/IT mode"* on a
+host whose array was healthy and fully addressable.
+
+**Measured by the filer** as root at `v11`, on a host with an LSI MegaRAID SAS 2208 and
+eight drives behind it, smartctl 7.5. `smartctl --scan` enumerated 8 `megaraid,N` specs;
+the device opened on both candidate nodes with exit `0`, so target selection — C-016's
+concern — was not the problem. The gate reproduced byte-exactly against the shipped
+invocation: `-H -A` matched it **0** times, `-i -H -A` matched it **2**. The `-H -A`
+response was itself complete and healthy, overall-health `PASSED` with a full attribute
+table. A working answer was being discarded for lacking fields it was never asked for.
+
+**Verified here** from smartctl's own documentation rather than by reasoning about it:
+`man smartctl` gives `-i` as the flag that "prints the device model number, serial
+number, firmware version", `-H` as health status alone, and `-A` as "only the vendor
+specific SMART Attributes". The gate cannot match `-H -A` output on any host, which makes
+this deterministic rather than hardware-dependent. Fixed by adding `-i`. Still read-only:
+`-i` prints identity, and `-t` remains the verb this script does not use — T1 unchanged
+and green.
+
+**This is the same wrong-answer-not-missing-answer class as C-016 and R2-009**, now for
+the third time in this one probe, and all three produced the identical false sentence.
+That the section *asserts* HBA/IT mode rather than staying silent is what keeps making it
+severe: a reader is told a fact about their controller that is not true.
+
+**The secondary finding was real and is fixed with it.** The extractors used a
+case-sensitive `/^Serial Number:/` while the gate used `grep -i`. The filer read this from
+the code and marked it unverified, being unreachable on that host's ATA drives.
+**Measured here instead of inferred**: `strings` over the 7.5 binary returns three serial
+format strings — `Serial Number:    %s` (ATA), `Serial Number:` at NVMe's column width,
+and **`Serial number:        %s`** for SCSI/SAS. So a SAS drive cleared the gate on
+`Product:` and landed a blank serial in a table whose reason for existing is the serial —
+a row present and wrong, which no row-count assertion can see. The extractor is now
+`tolower($0) ~ /^serial number:/`. The **model** extractor deliberately keeps its exact
+case: the same check returns `Device Model:`, `Model Number:` and `Product:` as the only
+three spellings the binary prints, so case-folding there would be speculative.
+
+`-n standby` being inert through this controller — it answers "CHECK POWER MODE not
+implemented, ignoring -n option" — is recorded and **not** changed. The guard costs
+nothing where it is ignored and matters on the direct-attach path.
+
+**The reason CI could not see this is the finding underneath the finding, and it is fixed
+at the source.** Both megaraid stubs — `tests/fixtures/percbin/smartctl` and T21's inline
+one — printed `Device Model:` and `Serial Number:` whatever options they were handed. They
+modelled *this script's gate* rather than the tool, so the probe passed at every ID in CI
+and missed at every ID on hardware. Adding one more test beside them would have left that
+backwards. **Both stubs now emit the information section only under `-i`**, which is what
+smartctl does, so T6 and T21 fail if the flag is ever dropped again. Verified: the pre-fix
+script against the corrected stub renders **0** megaraid rows and prints the false
+"No drives answered" line. Same class as CI-005 — a fixture that answers questions it was
+not asked cannot fail when the caller stops asking them.
+
+T24 is new and covers the half the corrected stubs still do not: a SAS drive that prints
+`Vendor:`/`Product:`/`Serial number:` with no `Device Model:` anywhere, asserting the
+serial lands **in the `megaraid,0` row** rather than merely somewhere in the report.
+
+Suite 217/0, baseline 207/0. All ten new assertions confirmed failing against the pre-fix
+script first. T6's root half and T7 ShellCheck **skip on this machine** — no root, no
+shellcheck — and both run in CI's root pass; T6's probe half was additionally exercised
+here against an `is_root() { true; }` copy, the documented workaround, and renders all
+four sparse IDs with C-016's target assertion intact.
+
+**Unverified here, and it does not need a field test to land**: the fix against a real
+LSI controller. The filer measured both halves of the gate on that hardware before filing,
+which is the measurement this entry rests on — `FT-015` still wants a controller numbering
+drives from 10 or higher, and that is R2-009's question, not this one.
+
+v12. It changes the emitted report for every host with a MegaRAID controller, from a false
+claim to a drive table.
+
+---
+
+### FR-009 — Array slots `emit()` drops a slot on blank `device`+`id` instead of on status — accepted, done
+
+Issue #8. The awk block building the Unraid Array slots table opened `emit()` with
+`if (dev == "" && id == "") return`. `status` was read into `st` and used only for
+display; the guard never consulted it. A slot was dropped on the basis of two blank fields
+rather than on what emhttp says that slot **is**.
+
+**Measured by the filer** as root at `v11` on an Unraid 7.3 host, healthy dual-parity
+array, exit `0`: `disks.ini` held 13 sections, the rendered table had 8 slots, and the
+five dropped were consecutive `disk*` slots with `status=DISK_NP` and both `device` and
+`id` empty. No warning, exit `0`.
+
+The intent of the guard is right — five `DISK_NP` rows of nothing but dashes are noise.
+**The key was wrong**, and the consequence is the part that makes this worth fixing rather
+than answering. `Disks missing`, `Disks invalid` and `Disks disabled` print from `var.ini`
+in the table *immediately above* this one. emhttp blanks both fields for any slot with no
+disk in it, so a slot whose disk emhttp had **lost** hit the same early return as an empty
+one. **A report stating "0 missing" beside a slot list that is missing entries is exactly
+what the warnings-block contract exists to prevent**, and it did it silently at exit `0`.
+
+Fixed as the issue proposed: `if (st == "DISK_NP") return`. Matching one status exactly is
+the design, not a shortcut — an unknown, absent or newly-introduced status now renders as
+a visible row instead of vanishing. The old guard was fail-silent on states nobody
+enumerated; this one is fail-visible. That also means the fix does not depend on knowing
+Unraid's full status vocabulary, which is the half this repo cannot establish.
+
+**Not verifiable on any host available to this project, and deliberately not blocking**:
+whether a disk emhttp has lost (`DISK_DSBL`, `DISK_INVALID`) also returns a blank `id`.
+No such slot exists on the filer's host and producing one means degrading a live array.
+It is **not load-bearing** — the guard was keyed on the wrong field regardless of what the
+disabled states write, and under the new key a lost slot renders whether its `id` is blank
+or not. No field test is filed, because there is no answer that would change the fix.
+
+The fixture gained the two slots that share the condition the old key tested and differ
+only in status: a `DISK_NP` slot that must stay suppressed, and a `DISK_DSBL` slot with
+the same two blank fields that must render. **Both halves are asserted, and that is the
+point** — an assertion on either alone passes against a guard that drops everything or one
+that drops nothing. The suppression half passes against the pre-fix script too, correctly:
+the old guard also dropped it. Only the `disk4` assertions distinguish the two keys, and
+they fail pre-fix. A third assertion requires the row to carry `DISK_DSBL`, since
+rendering a lost slot as an anonymous row of dashes still contradicts the counters above.
+
+Rendered output confirms both: `disk3` absent, `disk4` present as
+`| disk4 | — | — | 7.28 TB | — | — | DISK_DSBL | — |`.
+
+Suite 217/0, baseline 207/0.
+
+v12. It changes the emitted report for every Unraid host with an empty or lost array slot.
+
+---
+
 ## Repository audits — `A-`
 
 Whole-repo audits for over-engineering, run against the working tree rather than a

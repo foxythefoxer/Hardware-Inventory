@@ -38,7 +38,10 @@ Three of those are the serious kind: the instruction could not produce the answe
 it asked for, and in FT-012's case the entry's own **Send back** would have
 recorded the exact opposite of the truth — an argument for deleting a gate that
 works. Two answers surfaced defects rather than answers and were filed as issues
-#7 and #8, per this file's own rule.
+#7 and #8, per this file's own rule. **Both were adjudicated 2026-09-14 as FR-008
+and FR-009, accepted and fixed in `v12`**, which closed FT-008 with them — an
+entry whose hypothesis was refuted and whose real defect was fixed has nothing
+left to run, even though it never answered the question it actually asked.
 
 The lesson round two adds to round one's is one level up from the precondition
 rule: **an entry that measures a gated code path must ask for the ungated call
@@ -155,121 +158,6 @@ gets an ID in [`DISPOSITIONS.md`](DISPOSITIONS.md) like any other.
 ---
 
 ## Open
-
-### FT-008 — the megaraid probe target, on a host with a controller (C-016)
-
-- **Needs:** a host with a PERC/MegaRAID controller and drives behind it. An
-  Unraid host is the ideal one, because its USB boot key is the device the fix
-  is about; any host whose first non-NVMe disk is a USB stick will do.
-- **Why not here:** no RAID controller and no Unraid. The probe now picks its
-  target by `TRAN`, skipping `usb` and `nvme`, and that choice has only ever run
-  against a fixture that says what it was asked about. What a fixture cannot
-  tell you is what `lsblk` reports for a real controller-attached drive — if
-  those come back with `TRAN="usb"` on some enclosure, the filter would skip the
-  one disk it needs.
-- **Run:**
-  ```bash
-  lsblk -dn -P -o NAME,TYPE,TRAN
-  sudo bash hw-inventory.sh > "$HOME/hw-root.md"; echo "exit=$?"
-  grep -c '^| megaraid,' "$HOME/hw-root.md"
-  grep -c 'No drives answered' "$HOME/hw-root.md"
-  ```
-- **Run as:** **root for the script** — the probe is root-gated and an
-  unprivileged run skips it entirely, so a non-root answer says nothing. The
-  `lsblk` line needs no privilege.
-- **Send back:** the `TRAN` values only (`NAME` is not wanted — "one usb, three
-  sas, one nvme" is the whole answer, and **an empty `TRAN` is a valid value, not
-  a failed command** — see the correction below), the megaraid row count, and
-  whether the "No drives answered" line is present. A count above zero with that
-  line absent is the pass.
-
-**Now a measured fail, not a hypothetical — raised in priority, 2026-09-09.** This
-entry was not run, but a `v7` root report collected for FT-007 on a qualifying
-host (BMC, LSI MegaRAID SAS 2208, `megaraid_sas`, drives behind it) contains the
-answer to two of its three questions:
-
-- `smartctl --scan` in that report enumerates **eight** megaraid device specs,
-  `megaraid_disk_00` through `_07`.
-- `grep -c '^| megaraid,'` → **`0`**, and the report prints `_No drives answered
-  -d megaraid,N._`
-
-Against this entry's stated pass — a count above zero with that line absent —
-**that is the fail.** The probe found nothing on a controller whose drives
-`smartctl` itself can see and name. The `-d megaraid,N` block is byte-identical
-between `v7` and `v9`, so the evidence applies to the current code.
-
-**What it is not yet:** a diagnosed bug. Three explanations were on the table and
-the evidence moves them:
-
-1. *Controller in HBA/IT mode* — the fallback text's first guess, now the weakest.
-   In IT mode `--scan` reports drives as ordinary SCSI devices, not as
-   `megaraid_disk_NN`; it reported the latter.
-2. *Needs `-d cciss,N`* — the second guess, and `--scan` proposing `megaraid`
-   argues against it.
-3. **The target node** — the leading hypothesis, and it is the same *class* of
-   defect as C-016 rather than a new one. `--scan` proposes `/dev/bus/0` as the
-   passthrough node; the probe instead picks the first non-USB, non-NVMe disk from
-   `lsblk` and runs `-d megaraid,$n /dev/$MRTGT`. If that block device does not
-   route through the controller — a boot disk on the onboard AHCI controller would
-   not — then every one of the 32 IDs misses, the `misses >= 10` break fires, and
-   the output is exactly what was seen. **C-016's comment names only the Unraid
-   USB-key case; on this evidence the same symptom has a second cause, on a host
-   that is not Unraid and whose first non-USB disk is not a boot key.**
-
-**The one thing to send, and it discriminates all three.** Read-only, root, and it
-needs no report:
-
-```bash
-lsblk -dn -P -o NAME,TYPE,TRAN                      # what the probe picks from
-smartctl --scan | head -3                           # what smartctl proposes
-# Does ID 0 answer on smartctl's node but not on the probe's?
-MRTGT=$(lsblk -dn -P -o NAME,TYPE,TRAN | grep -Ev 'NAME="nvme|TRAN="(usb|nvme)"' \
-  | sed -n 's/^NAME="\([^"]*\)".*/\1/p' | head -1); echo "probe would pick: $MRTGT"
-# `-i` is not optional: without an operating-mode option smartctl only OPENS the
-# device and prints "Use 'smartctl -a' ...", so both counts read 0 on a working
-# controller and the pair stops discriminating anything (correction, round two).
-smartctl -i -d megaraid,0 "/dev/$MRTGT" | grep -cE '^(Device Model|Product|Serial Number):'
-smartctl -i -d megaraid,0 /dev/bus/0    | grep -cE '^(Device Model|Product|Serial Number):'
-```
-
-**Send back:** the `TRAN` values (no `NAME`s — "one sas, one nvme" is the answer,
-and two blanks is also an answer), the `--scan` lines with any serials or WWNs
-cut, and the two counts. `0` then non-zero confirms hypothesis 3 and makes this a
-script bug; both `0` means the passthrough is refusing this caller entirely and
-the cause is elsewhere. The likely fix if it is 3 — deriving the target from
-`smartctl --scan`, which already proposes the right node — is not being written
-until this comes back, because it would replace a working code path on a guess.
-
-**Hypothesis 3 is refuted, 2026-09-13, `v11` — and the finding went to issue #7.**
-The measurement and the diagnosis are on the issue; it awaits a verdict there
-rather than here, so **this entry stays open until that lands** and whoever runs
-it next runs the text above. What belongs here is that the target-node
-hypothesis this entry was built to test is **wrong**: on that host the
-passthrough works from every node tried. All three forms — `-d megaraid,0` on
-the probe's own target, on `/dev/bus/0`, and `-d sat+megaraid,0` — return "ATA
-device successfully opened" at exit `0`, and `--scan` enumerates all eight
-drives. The probe is not picking the wrong device.
-
-- **Correction, and it is why the refutation nearly did not happen: the
-  discriminating pair did not discriminate.** Both lines ran `smartctl -d
-  megaraid,0 <node>` with no operating-mode option, so smartctl only opens the
-  device and prints "Use 'smartctl -a' ... to print SMART information" — **both
-  counts come back `0` on a perfectly working controller**, for want of a question
-  rather than for want of a drive. This entry read both-`0` as "the passthrough is
-  refusing this caller entirely and the cause is elsewhere", which on this
-  evidence would have been a false negative pointing away from the real defect.
-  `-i` is now in both lines. It was caught only because the operator dumped the
-  full output instead of trusting the count.
-- **Correction: the `TRAN` example read as an expectation.** Both disks on that
-  host report **empty** transport and there is no NVMe at all. Empty `TRAN` is
-  normal for controller-backed virtual disks — it is exactly what the probe's own
-  filter treats as eligible — but an operator who gets two blanks where the entry
-  showed "one sas, one nvme" may reasonably conclude the command failed. Both
-  **Send back** lines now say so.
-- One secondary observation, not worth an entry of its own: `-n standby` is inert
-  through that controller, which answers "CHECK POWER MODE not implemented,
-  ignoring -n option". Not a defect — the standby guard simply does nothing on
-  that path.
 
 ### FT-011 — does the RAID CLI write a log, and does it take `nolog`? (R2-001)
 
@@ -486,6 +374,123 @@ not produce its own answer, what actually settles the question was run second an
 correction.** Four entries below therefore carry a verdict *and* a defect in the
 instruction that produced it.
 
+### FT-008 — answered, and the hypothesis was wrong. The probe target was never the problem; the missing `-i` was. (C-016)
+
+- **Needs:** a host with a PERC/MegaRAID controller and drives behind it. An
+  Unraid host is the ideal one, because its USB boot key is the device the fix
+  is about; any host whose first non-NVMe disk is a USB stick will do.
+- **Why not here:** no RAID controller and no Unraid. The probe now picks its
+  target by `TRAN`, skipping `usb` and `nvme`, and that choice has only ever run
+  against a fixture that says what it was asked about. What a fixture cannot
+  tell you is what `lsblk` reports for a real controller-attached drive — if
+  those come back with `TRAN="usb"` on some enclosure, the filter would skip the
+  one disk it needs.
+- **Run:**
+  ```bash
+  lsblk -dn -P -o NAME,TYPE,TRAN
+  sudo bash hw-inventory.sh > "$HOME/hw-root.md"; echo "exit=$?"
+  grep -c '^| megaraid,' "$HOME/hw-root.md"
+  grep -c 'No drives answered' "$HOME/hw-root.md"
+  ```
+- **Run as:** **root for the script** — the probe is root-gated and an
+  unprivileged run skips it entirely, so a non-root answer says nothing. The
+  `lsblk` line needs no privilege.
+- **Send back:** the `TRAN` values only (`NAME` is not wanted — "one usb, three
+  sas, one nvme" is the whole answer, and **an empty `TRAN` is a valid value, not
+  a failed command** — see the correction below), the megaraid row count, and
+  whether the "No drives answered" line is present. A count above zero with that
+  line absent is the pass.
+
+**Now a measured fail, not a hypothetical — raised in priority, 2026-09-09.** This
+entry was not run, but a `v7` root report collected for FT-007 on a qualifying
+host (BMC, LSI MegaRAID SAS 2208, `megaraid_sas`, drives behind it) contains the
+answer to two of its three questions:
+
+- `smartctl --scan` in that report enumerates **eight** megaraid device specs,
+  `megaraid_disk_00` through `_07`.
+- `grep -c '^| megaraid,'` → **`0`**, and the report prints `_No drives answered
+  -d megaraid,N._`
+
+Against this entry's stated pass — a count above zero with that line absent —
+**that is the fail.** The probe found nothing on a controller whose drives
+`smartctl` itself can see and name. The `-d megaraid,N` block is byte-identical
+between `v7` and `v9`, so the evidence applies to the current code.
+
+**What it is not yet:** a diagnosed bug. Three explanations were on the table and
+the evidence moves them:
+
+1. *Controller in HBA/IT mode* — the fallback text's first guess, now the weakest.
+   In IT mode `--scan` reports drives as ordinary SCSI devices, not as
+   `megaraid_disk_NN`; it reported the latter.
+2. *Needs `-d cciss,N`* — the second guess, and `--scan` proposing `megaraid`
+   argues against it.
+3. **The target node** — the leading hypothesis, and it is the same *class* of
+   defect as C-016 rather than a new one. `--scan` proposes `/dev/bus/0` as the
+   passthrough node; the probe instead picks the first non-USB, non-NVMe disk from
+   `lsblk` and runs `-d megaraid,$n /dev/$MRTGT`. If that block device does not
+   route through the controller — a boot disk on the onboard AHCI controller would
+   not — then every one of the 32 IDs misses, the `misses >= 10` break fires, and
+   the output is exactly what was seen. **C-016's comment names only the Unraid
+   USB-key case; on this evidence the same symptom has a second cause, on a host
+   that is not Unraid and whose first non-USB disk is not a boot key.**
+
+**The one thing to send, and it discriminates all three.** Read-only, root, and it
+needs no report:
+
+```bash
+lsblk -dn -P -o NAME,TYPE,TRAN                      # what the probe picks from
+smartctl --scan | head -3                           # what smartctl proposes
+# Does ID 0 answer on smartctl's node but not on the probe's?
+MRTGT=$(lsblk -dn -P -o NAME,TYPE,TRAN | grep -Ev 'NAME="nvme|TRAN="(usb|nvme)"' \
+  | sed -n 's/^NAME="\([^"]*\)".*/\1/p' | head -1); echo "probe would pick: $MRTGT"
+# `-i` is not optional: without an operating-mode option smartctl only OPENS the
+# device and prints "Use 'smartctl -a' ...", so both counts read 0 on a working
+# controller and the pair stops discriminating anything (correction, round two).
+smartctl -i -d megaraid,0 "/dev/$MRTGT" | grep -cE '^(Device Model|Product|Serial Number):'
+smartctl -i -d megaraid,0 /dev/bus/0    | grep -cE '^(Device Model|Product|Serial Number):'
+```
+
+**Send back:** the `TRAN` values (no `NAME`s — "one sas, one nvme" is the answer,
+and two blanks is also an answer), the `--scan` lines with any serials or WWNs
+cut, and the two counts. `0` then non-zero confirms hypothesis 3 and makes this a
+script bug; both `0` means the passthrough is refusing this caller entirely and
+the cause is elsewhere. The likely fix if it is 3 — deriving the target from
+`smartctl --scan`, which already proposes the right node — is not being written
+until this comes back, because it would replace a working code path on a guess.
+
+**Hypothesis 3 is refuted, 2026-09-13, `v11` — and the finding went to issue #7.**
+The measurement and the diagnosis are on the issue. **That verdict landed
+2026-09-14 as FR-008, accepted and fixed in `v12`, so this entry is now closed** —
+`-i` was added to the probe's `smartctl` call, which is the question this entry
+was really asking without knowing it. The target-node fix this entry was built to
+evaluate was **not** made: it was never the problem. What belongs here is that the target-node
+hypothesis this entry was built to test is **wrong**: on that host the
+passthrough works from every node tried. All three forms — `-d megaraid,0` on
+the probe's own target, on `/dev/bus/0`, and `-d sat+megaraid,0` — return "ATA
+device successfully opened" at exit `0`, and `--scan` enumerates all eight
+drives. The probe is not picking the wrong device.
+
+- **Correction, and it is why the refutation nearly did not happen: the
+  discriminating pair did not discriminate.** Both lines ran `smartctl -d
+  megaraid,0 <node>` with no operating-mode option, so smartctl only opens the
+  device and prints "Use 'smartctl -a' ... to print SMART information" — **both
+  counts come back `0` on a perfectly working controller**, for want of a question
+  rather than for want of a drive. This entry read both-`0` as "the passthrough is
+  refusing this caller entirely and the cause is elsewhere", which on this
+  evidence would have been a false negative pointing away from the real defect.
+  `-i` is now in both lines. It was caught only because the operator dumped the
+  full output instead of trusting the count.
+- **Correction: the `TRAN` example read as an expectation.** Both disks on that
+  host report **empty** transport and there is no NVMe at all. Empty `TRAN` is
+  normal for controller-backed virtual disks — it is exactly what the probe's own
+  filter treats as eligible — but an operator who gets two blanks where the entry
+  showed "one sas, one nvme" may reasonably conclude the command failed. Both
+  **Send back** lines now say so.
+- One secondary observation, not worth an entry of its own: `-n standby` is inert
+  through that controller, which answers "CHECK POWER MODE not implemented,
+  ignoring -n option". Not a defect — the standby guard simply does nothing on
+  that path.
+
 ### FT-001 — answered. UPS rows from a live daemon, and the predicted failure did not happen.
 
 Confirmed on an Unraid host running `apcupsd` against a USB-attached UPS, both
@@ -699,9 +704,9 @@ blank `id` cannot be measured on that host, and that is not a host-class gap lik
 FT-011 and FT-015: it needs a **fault**, not a host, and no estate should
 manufacture one on a live array to answer a field test. It also cannot change
 anything. The answered half already establishes the drop is reachable, and the
-fix under adjudication in #8 — keying the guard on `status` rather than on
-`device`+`id` — makes `emhttp`'s retention of `id` irrelevant in either
-direction. Same shape as FT-006: no further measurement can move it, so it
+fix — keying the guard on `status` rather than on `device`+`id`, **adjudicated
+2026-09-14 as FR-009 and shipped in `v12`** — makes `emhttp`'s retention of `id`
+irrelevant in either direction. Same shape as FT-006: no further measurement can move it, so it
 closes rather than sitting open waiting for a degraded array nobody should
 produce.
 

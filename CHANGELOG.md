@@ -26,6 +26,39 @@ sudo bash /opt/hw-inventory/hw-inventory.sh > "$(hostname)-$(date +%F).md"
 
 ---
 
+## v12
+
+`FR-008` and `FR-009`, the two defects that came back from field-test round two
+as findings rather than answers — both measured against `v11` itself, which is
+what earns the number here rather than the merge.
+
+`FR-008` (issue #7): the `-d megaraid,N` probe required `Device Model` /
+`Product` / `Serial Number` before counting a hit, and asked `smartctl` only for
+`-H -A`, which produces none of them. Every ID missed, and the section then
+*asserted* the controller was empty — "No drives answered … may be in HBA/IT
+mode" — on a host with eight healthy drives behind an LSI SAS 2208. Third time
+this one probe has produced that same false sentence (C-016, R2-009). `-i`
+added; the SAS serial extractor case-folded with it, since smartctl spells it
+`Serial number:` for SCSI and a SAS drive was landing a blank serial in a table
+that exists to report serials.
+
+`FR-009` (issue #8): the Unraid Array slots guard dropped a slot on blank
+`device`+`id` rather than on status, taking five of thirteen slots on a healthy
+dual-parity array — silently, at exit `0`, while `Disks missing: 0` printed in
+the table directly above it. Keyed on `status == "DISK_NP"` now, so an empty
+slot stays suppressed and a lost one renders.
+
+Report-changing for two host classes that **had both already filed reports under
+`v11`**, which is the distinction v8/v9 below got wrong: those two changed
+nothing on any host that had been run, and these change what the estate is
+currently holding.
+
+The durable fix is in the fixtures. Both megaraid stubs printed identity fields
+whatever options they were handed — they modelled the script's own gate instead
+of the tool — so the probe passed at every ID in CI and missed at every ID on
+hardware. They now answer only what they are asked, and T6/T21 fail if the flag
+is ever dropped again.
+
 ## v11
 
 `R2-003`: without `timeout` on `PATH`, the empty wrapper array aborted the

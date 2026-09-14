@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hw-inventory.sh v11 — emit a Markdown block describing this host.
+# hw-inventory.sh v12 — emit a Markdown block describing this host.
 #
 # Read-only. Collects nothing off-box, writes nothing, sends nothing.
 # Every command is a query. Deliberately absent: smartctl -t (self-tests),
@@ -411,7 +411,7 @@ fi
 # the header's clock time is read separately, and nothing parses that.
 NOW_ISO=$(date -Iseconds)
 NOW_DATE=${NOW_ISO%%T*}
-printf '<!-- hw-inventory:begin host=%s collected=%s collector=hw-inventory.sh/v11 -->\n\n' \
+printf '<!-- hw-inventory:begin host=%s collected=%s collector=hw-inventory.sh/v12 -->\n\n' \
   "$HOST" "$NOW_ISO"
 printf -- '---\n'
 yk host "$HOST"
@@ -425,7 +425,7 @@ yk cpu "$CPUMODEL"
 yk ram "${RAMTOTAL:-}"
 printf 'role: ""            # fill in: nas | hypervisor | desktop | laptop\n'
 printf 'collected: %s\n' "$NOW_DATE"
-printf 'collector: hw-inventory.sh v11\n'
+printf 'collector: hw-inventory.sh v12\n'
 printf 'tags: [homelab, inventory, hardware]\n'
 printf -- '---\n\n'
 
@@ -813,7 +813,17 @@ if [ -n "$RAIDCTL" ]; then
         # MEGARAID_PROBE_S is here for the pathological case where every call
         # burns its full `tmo 6`, not for the normal one.
         if [ "$((SECONDS - probe_start))" -ge "$MEGARAID_PROBE_S" ]; then probe_cut=1; break; fi
-        MS=$(tmo 6 smartctl -n standby -H -A -d "megaraid,$n" "/dev/$MRTGT" 2>/dev/null || true)
+        # `-i` is what prints Device Model / Model Number / Product / Serial
+        # Number, and the gate below requires one of them (FR-008). Without it
+        # the probe asked for health and attributes, then discarded every
+        # answer for lacking fields it never requested: measured on an LSI SAS
+        # 2208 with eight healthy drives, `-H -A` matched the gate 0 times and
+        # `-i -H -A` matched it twice, so `hits` stayed 0 and the section
+        # printed "No drives answered" over a fully addressable array. Same
+        # wrong-answer-not-missing-answer class as C-016 and R2-009. Still a
+        # read: `-i` prints identity, and `-t` remains the verb this script
+        # does not use.
+        MS=$(tmo 6 smartctl -n standby -i -H -A -d "megaraid,$n" "/dev/$MRTGT" 2>/dev/null || true)
         if ! printf '%s' "$MS" | grep -qiE '^Device Model:|^Model Number:|^Product:|^Serial Number:'; then
           misses=$((misses + 1))
           # Device IDs can be sparse; give up only after a long empty run — and
@@ -823,7 +833,15 @@ if [ -n "$RAIDCTL" ]; then
         fi
         misses=0; hits=$((hits + 1))
         mdl=$(printf '%s\n' "$MS" | awk -F: '/^Device Model:|^Model Number:|^Product:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
-        ser=$(printf '%s\n' "$MS" | awk -F: '/^Serial Number:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
+        # Case-insensitive because smartctl spells this two ways and the gate
+        # above already matches both: `Serial Number:` for ATA and NVMe,
+        # `Serial number:` for SCSI/SAS. Verified against the 7.5 binary, which
+        # carries all three format strings. A SAS drive therefore cleared the
+        # gate on `Product:` and landed a blank serial in a table whose reason
+        # for existing is the serial. The model spellings need no such
+        # treatment — `Device Model:`, `Model Number:` and `Product:` are the
+        # exact three the binary prints.
+        ser=$(printf '%s\n' "$MS" | awk -F: 'tolower($0) ~ /^serial number:/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
         hlt=$(printf '%s\n' "$MS" | awk -F: '/overall-health|SMART Health Status/{gsub(/^[ \t]+/,"",$2); print $2; exit}')
         poh=$(printf '%s\n' "$MS" | awk '/Power_On_Hours/{print $10; exit}')
         [ -z "$poh" ] && poh=$(printf '%s\n' "$MS" | awk -F: '/number of hours powered up/{gsub(/[ ,]/,"",$2); print int($2); exit}')
@@ -885,7 +903,21 @@ if [ -r /var/local/emhttp/var.ini ] || [ -r /var/local/emhttp/disks.ini ]; then
       function esc(s) { gsub(/\|/, "\\|", s); return s }
       function emit() {
         if (sec == "") return
-        if (dev == "" && id == "") return
+        # FR-009. Key the skip on what emhttp says the slot IS, not on two
+        # blank fields. `DISK_NP` is "no disk assigned" — the rows of nothing
+        # but dashes this guard exists to suppress, and on a healthy
+        # dual-parity array there were five of them. But emhttp blanks BOTH
+        # `device` and `id` for any slot with no disk in it, so the old key
+        # also dropped a slot whose disk emhttp had lost, silently and at exit
+        # 0, while `Disks missing` / `Disks invalid` / `Disks disabled` printed
+        # from var.ini in the table directly above still counted it. A report
+        # contradicting its own counters is the failure mode the warnings block
+        # exists to prevent.
+        #
+        # Matching one status exactly is the point: an unknown or absent status
+        # now renders as a visible row rather than vanishing. Fail visible, not
+        # fail silent — the old guard had that backwards.
+        if (st == "DISK_NP") return
         printf "| %s | %s | %s | %s | %s | %s | %s | %s |\n", \
           sec, (dev==""?"—":"/dev/" dev), (id==""?"—":id), hs(sz), \
           (fs==""?"—":fs), (fsz==""?"—":hs(fsz) " (" pct(fu,fsz) " used)"), \
